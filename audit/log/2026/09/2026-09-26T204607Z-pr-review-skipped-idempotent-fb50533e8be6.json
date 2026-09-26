@@ -1,0 +1,1 @@
+{"agent":"overseer","event":"pr-review-skipped-idempotent","head_sha":"a073148b2be68680fa94894117c3126d920e00d8","pr":1871,"reason":"§1215: HUMAN_REQUIRED verdict already posted on this head at 2026-09-26T19:56:50Z (post-approval, sole blocker needs-human label); since then only a worker status comment; no new commits, reviews, or label changes"}
