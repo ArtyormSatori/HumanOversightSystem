@@ -1,0 +1,1 @@
+{"agent":"hos-overseer-hos[bot]","event":"human-required","head_sha":"1440ccf42896b8a84c4c756b07f8f4841f209362","pr":1879,"reason_category":"blocking-label","summary":"Human approved current head, all checks green; decide_merge_authority HUMAN_REQUIRED solely on needs-human label (#756). Verdict review 5329288396, expected action OTHER.","tier":"HIGH"}
