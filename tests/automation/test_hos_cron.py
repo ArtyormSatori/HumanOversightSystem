@@ -113,6 +113,13 @@ class CronEnv:
         # call (overwritten on each call).
         self.issue_comment_marker = tmp_path / "issue_comment.log"
         self.issue_comment_body_capture = tmp_path / "issue_comment_body.log"
+        # #1903: real files created in the REAL /tmp (not tmp_path) by
+        # make_valid_inner_loop_log(), tracked here so the `cron` fixture's
+        # teardown removes them — the launcher's `_bs_validate_log` helper
+        # requires an exact `/tmp/hos-inner-loop-...` shape, so tests that
+        # want the positive (accepted) path can't just point at an arbitrary
+        # tmp_path fixture file.
+        self._real_tmp_logs: list[str] = []
 
         # ── claude stub: records how it was invoked, never spawns the real CLI ──
         # $0 proves thin-env resolved it by absolute path off the pinned PATH;
@@ -321,12 +328,20 @@ class CronEnv:
         # inner-loop test runner stub — records each invocation so the #789
         # cowpat tests can assert whether the cycle-start baseline actually ran,
         # and honors HOS_TEST_INNER_LOOP_EXIT to exercise the baseline-fail path.
+        # #1903: the real script only prints `INNER_LOOP_LOG=<path>` on a
+        # nonzero exit when `--failure-log` captured something; mirror that
+        # here, opt-in via HOS_TEST_INNER_LOOP_LOG, so tests can exercise the
+        # launcher's log-path plumbing without a real failing suite.
         self.baseline_marker = tmp_path / "inner_loop_ran.log"
         _write_exec(
             self.repo / "scripts" / "framework" / "run_tests_inner_loop.sh",
             "#!/usr/bin/env bash\n"
             f'echo "ran" >> "{self.baseline_marker}"\n'
-            'exit "${HOS_TEST_INNER_LOOP_EXIT:-0}"\n',
+            '_exit="${HOS_TEST_INNER_LOOP_EXIT:-0}"\n'
+            'if [[ "$_exit" != "0" && -n "${HOS_TEST_INNER_LOOP_LOG:-}" ]]; then\n'
+            '  echo "INNER_LOOP_LOG=${HOS_TEST_INNER_LOOP_LOG}"\n'
+            'fi\n'
+            'exit "$_exit"\n',
         )
         # ensure_venv.sh stub: exit 0 by default (healthy venv); override with
         # HOS_TEST_ENSURE_VENV_EXIT to simulate a broken venv.
@@ -910,6 +925,21 @@ class CronEnv:
         fingerprint + exit code) for worker/<project>."""
         return self.state / "baseline-red" / f"worker-{project}"
 
+    def make_valid_inner_loop_log(self, content: str = "pytest output\n") -> Path:
+        """Create a real file in the REAL /tmp matching
+        run_tests_inner_loop.sh's own --failure-log naming template exactly
+        (#1903) — the launcher's `_bs_validate_log` helper requires the path
+        to match that shape AND exist AND be owned by the current user, so a
+        bare tmp_path fixture path is deliberately rejected. Owned-by-us and
+        existing are automatic (we just created it); tracked in
+        self._real_tmp_logs for the `cron` fixture's teardown to remove."""
+        ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        suffix = f"{os.getpid()}{len(self._real_tmp_logs)}"
+        path = Path(f"/tmp/hos-inner-loop-{ts}-deadbee-{suffix}.log")
+        path.write_text(content)
+        self._real_tmp_logs.append(str(path))
+        return path
+
     def baseline_run_count(self) -> int:
         """How many times the cycle-start inner-loop test runner has actually
         been invoked across all `cron.run()` calls against this fixture so
@@ -961,7 +991,12 @@ class CronEnv:
 
 @pytest.fixture
 def cron(tmp_path):
-    return CronEnv(tmp_path)
+    env = CronEnv(tmp_path)
+    yield env
+    # #1903: clean up any real /tmp files make_valid_inner_loop_log() created —
+    # tmp_path itself is auto-cleaned by pytest, but the real /tmp is not.
+    for _p in env._real_tmp_logs:
+        Path(_p).unlink(missing_ok=True)
 
 
 # ───────────────────────────── Arg validation ──────────────────────────────
@@ -2665,6 +2700,224 @@ class TestBaselineRetryBackoff:
         assert "repair exhausted" in r4.stdout
         assert cron.aa_issue_created()
         assert cron.baseline_run_count() == 1, "the suite was never re-run across all four cycles"
+
+
+# ───────────────── Baseline failure log plumbing, opt-in (#1903) ────────────
+class TestBaselineFailureLog:
+    """`run_tests_inner_loop.sh --failure-log` (always passed by the launcher
+    now) prints `INNER_LOOP_LOG=<path>` on stdout on a nonzero exit; the
+    launcher greps that marker off a teed scratch copy of the suite's stdout
+    (never disturbing what reaches the console) and threads the path through
+    the FAILED echo line, the [BLOCKED] issue bodies, and the #1498 red-state
+    cache used by the repeat-skip path.
+
+    The marker and the cached _BR_STATE copy are both parsed off untrusted
+    surfaces (the suite's own stdout; a file whose prior write came from that
+    same parse), so the launcher's `_bs_validate_log` helper re-validates both
+    against the exact `/tmp/hos-inner-loop-<ts>-<sha>-<rand>.log` shape AND
+    requires `-f`/`-O` before ever using the value — see
+    TestBaselineFailureLogSpoofing for the rejection cases. Positive-path
+    tests here use `cron.make_valid_inner_loop_log()`, a real file in the
+    real /tmp matching that exact shape (a bare tmp_path fixture file would
+    now be correctly rejected).
+
+    `_audit`'s own `cycle-preflight-fail` event is not independently
+    observable in this harness (scripts.automation.lib.cycle_log is
+    deliberately not copied into the fake repo — see the setup comment above
+    — so `_audit` fails closed and is silently swallowed). The FAILED stdout
+    line is written from the exact same validated `_bs_log` variable used to
+    build the `_audit` call's separate `log=` argument, so it is the
+    equivalent observable proxy for what reaches the audit event."""
+
+    def test_log_path_appears_on_failure_line_and_issue_body(self, cron):
+        """Default (repair) mode, ordinary assertion failure with a captured
+        log path → the path appears on the FAILED stdout line and in the
+        filed diagnose-and-fix issue body."""
+        fake_log = cron.make_valid_inner_loop_log()
+        cron.git_init_repo()
+        r = cron.run(
+            env_overrides={
+                "HOS_TEST_INNER_LOOP_EXIT": "1",
+                "HOS_TEST_INNER_LOOP_LOG": str(fake_log),
+            }
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert f"— log: {fake_log}" in r.stdout
+        assert cron.aa_issue_created()
+        assert f"Full test output: `{fake_log}`" in cron.aa_issue_body()
+        assert "not retained long-term" in cron.aa_issue_body()
+        assert "swept from /tmp after" not in cron.aa_issue_body()
+
+    def test_log_path_appears_in_legacy_halt_issue_body(self, cron):
+        """Explicit halt opt-out (#1496) → the log path also appears in the
+        needs-human "worker halted" issue body."""
+        fake_log = cron.make_valid_inner_loop_log()
+        cron.git_init_repo()
+        cron.set_baseline_on_red("halt")
+        r = cron.run(
+            env_overrides={
+                "HOS_TEST_INNER_LOOP_EXIT": "1",
+                "HOS_TEST_INNER_LOOP_LOG": str(fake_log),
+                "HOS_TEST_NEEDS_HUMAN_BLOCKED": "0",
+            }
+        )
+        assert r.returncode == 1, r.stdout + r.stderr
+        assert cron.aa_issue_created()
+        assert f"Full test output: `{fake_log}`" in cron.aa_issue_body()
+        assert "not retained long-term" in cron.aa_issue_body()
+
+    def test_no_log_path_omits_log_field_everywhere(self, cron):
+        """The stub emits no INNER_LOOP_LOG marker (HOS_TEST_INNER_LOOP_LOG
+        unset) → no "— log:" on the FAILED line and no "Full test output"
+        note in the issue body — byte-identical to pre-#1903 behavior."""
+        cron.git_init_repo()
+        r = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "INNER-LOOP BASELINE TESTS FAILED (exit 1)" in r.stdout
+        assert "— log:" not in r.stdout
+        assert cron.aa_issue_created()
+        assert "Full test output" not in cron.aa_issue_body()
+
+    def test_repeat_skip_reuses_cached_log_when_file_still_exists(self, cron):
+        """#1498 repeat-skip path: identical HEAD+worktree state reuses the
+        cached exit code without re-running the suite — and, per #1903, also
+        reuses the cached log path when that file is still on disk (and
+        re-validates against the exact same shape/-f/-O check)."""
+        fake_log = cron.make_valid_inner_loop_log()
+        cron.git_init_repo()
+        r1 = cron.run(
+            env_overrides={
+                "HOS_TEST_INNER_LOOP_EXIT": "1",
+                "HOS_TEST_INNER_LOOP_LOG": str(fake_log),
+            }
+        )
+        assert r1.returncode == 0, r1.stdout + r1.stderr
+        assert cron.baseline_run_count() == 1
+        assert "log=" + str(fake_log) in cron.baseline_red_state_file().read_text()
+
+        r2 = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert cron.baseline_run_count() == 1, "identical state must skip the redundant suite re-run"
+        assert "skipping redundant re-run" in r2.stdout
+        assert f"— log: {fake_log}" in r2.stdout, "cached log path must survive the repeat-skip"
+
+    def test_repeat_skip_drops_cached_log_when_file_gone(self, cron):
+        """Same repeat-skip scenario, but the cached log file has since been
+        swept from /tmp — the launcher must not claim a path that no longer
+        exists."""
+        fake_log = cron.make_valid_inner_loop_log()
+        cron.git_init_repo()
+        r1 = cron.run(
+            env_overrides={
+                "HOS_TEST_INNER_LOOP_EXIT": "1",
+                "HOS_TEST_INNER_LOOP_LOG": str(fake_log),
+            }
+        )
+        assert r1.returncode == 0, r1.stdout + r1.stderr
+        assert cron.baseline_run_count() == 1
+
+        fake_log.unlink()
+        r2 = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert cron.baseline_run_count() == 1, "identical state must still skip the redundant suite re-run"
+        assert "skipping redundant re-run" in r2.stdout
+        assert "— log:" not in r2.stdout, "swept log file must not be reused"
+
+
+# ───────────── Baseline failure log spoofing rejection, security (#1903) ────
+class TestBaselineFailureLogSpoofing:
+    """The INNER_LOOP_LOG=<path> marker is parsed off the same stdout stream
+    that carries untrusted test output, and the cached _BR_STATE copy is just
+    as untrusted (written from a prior identical parse) — either could be
+    spoofed by test output that happens to contain a line shaped like the
+    marker. `_bs_validate_log` must reject anything that doesn't match the
+    exact shape AND exist AND be owned by the current user; a rejection must
+    degrade to exactly the no-log behavior (no path anywhere in stdout or the
+    issue body), never propagate the spoofed value.
+
+    The `-O` (owned-by-current-user) branch of the check is exercised
+    directly by a standalone shell check during development (not practical
+    to cover here — creating a file owned by a DIFFERENT uid needs root/sudo,
+    unavailable in this test environment); the exact-shape and `-f` branches
+    below are what's mechanically testable in-process."""
+
+    def _assert_log_rejected_everywhere(self, cron, r, spoofed: str) -> None:
+        # The raw `INNER_LOOP_LOG=<spoofed>` line is the (fake) suite's own
+        # real stdout, legitimately teed straight through to the console/cron
+        # log unaltered — that's expected and matches production (a hostile
+        # test's real output does reach the log). What must NEVER happen is
+        # the launcher treating it as a validated path: it must not appear on
+        # the launcher's own annotated "— log:" line, nor in anything the
+        # launcher itself writes (issue body, audit event proxy).
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "— log:" not in r.stdout
+        assert cron.aa_issue_created()
+        assert spoofed not in cron.aa_issue_body()
+        assert "Full test output" not in cron.aa_issue_body()
+
+    def test_spoofed_marker_outside_tmp_is_rejected(self, cron):
+        """A marker pointing at an arbitrary file (e.g. /etc/passwd) — wrong
+        shape entirely — must never surface anywhere."""
+        cron.git_init_repo()
+        r = cron.run(
+            env_overrides={
+                "HOS_TEST_INNER_LOOP_EXIT": "1",
+                "HOS_TEST_INNER_LOOP_LOG": "/etc/passwd",
+            }
+        )
+        self._assert_log_rejected_everywhere(cron, r, "/etc/passwd")
+
+    def test_spoofed_marker_with_backtick_is_rejected(self, cron):
+        """A marker that looks superficially plausible but carries a
+        shell-metacharacter payload must be rejected by the anchored regex,
+        not merely have the payload survive inertly."""
+        spoofed = "/tmp/hos-inner-loop-20260101T000000Z-abc1234-x`id`.log"
+        cron.git_init_repo()
+        r = cron.run(
+            env_overrides={
+                "HOS_TEST_INNER_LOOP_EXIT": "1",
+                "HOS_TEST_INNER_LOOP_LOG": spoofed,
+            }
+        )
+        self._assert_log_rejected_everywhere(cron, r, spoofed)
+
+    def test_correctly_shaped_but_nonexistent_marker_is_rejected(self, cron):
+        """A marker matching the regex exactly but pointing at a file that
+        was never actually created (the suite lied, or the file was already
+        reaped) must fail the `-f` check."""
+        spoofed = "/tmp/hos-inner-loop-20260101T000000Z-abc1234-ZZZZZZ.log"
+        assert not Path(spoofed).exists(), "test precondition: file must not exist"
+        cron.git_init_repo()
+        r = cron.run(
+            env_overrides={
+                "HOS_TEST_INNER_LOOP_EXIT": "1",
+                "HOS_TEST_INNER_LOOP_LOG": spoofed,
+            }
+        )
+        self._assert_log_rejected_everywhere(cron, r, spoofed)
+
+    def test_spoofed_br_state_log_is_rejected_on_repeat_skip(self, cron):
+        """The #1498 repeat-skip cache read must apply the exact same
+        validation as the fresh parse — a hand-edited or otherwise corrupted
+        _BR_STATE `log=` line must not resurrect a spoofed path just because
+        it made it onto disk once."""
+        cron.git_init_repo()
+        r1 = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
+        assert r1.returncode == 0, r1.stdout + r1.stderr
+        assert cron.baseline_run_count() == 1
+
+        state = cron.baseline_red_state_file()
+        lines = [ln for ln in state.read_text().splitlines() if not ln.startswith("log=")]
+        lines.append("log=/etc/passwd")
+        state.write_text("\n".join(lines) + "\n")
+
+        r2 = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
+        assert r2.returncode == 0, r2.stdout + r2.stderr
+        assert cron.baseline_run_count() == 1, "identical state must still skip the redundant suite re-run"
+        assert "skipping redundant re-run" in r2.stdout
+        assert "/etc/passwd" not in r2.stdout
+        assert "— log:" not in r2.stdout
+        assert "/etc/passwd" not in cron.aa_issue_body()
 
 
 # ───────────────── Stranded zero-commit branch reap, always-on (#1498) ───────
