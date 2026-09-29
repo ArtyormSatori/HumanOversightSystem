@@ -340,7 +340,7 @@ class CronEnv:
             '_exit="${HOS_TEST_INNER_LOOP_EXIT:-0}"\n'
             'if [[ "$_exit" != "0" && -n "${HOS_TEST_INNER_LOOP_LOG:-}" ]]; then\n'
             '  echo "INNER_LOOP_LOG=${HOS_TEST_INNER_LOOP_LOG}"\n'
-            'fi\n'
+            "fi\n"
             'exit "$_exit"\n',
         )
         # ensure_venv.sh stub: exit 0 by default (healthy venv); override with
@@ -935,7 +935,7 @@ class CronEnv:
         self._real_tmp_logs for the `cron` fixture's teardown to remove."""
         ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
         suffix = f"{os.getpid()}{len(self._real_tmp_logs)}"
-        path = Path(f"/tmp/hos-inner-loop-{ts}-deadbee-{suffix}.log")
+        path = Path(f"/tmp/hos-inner-loop-{ts}-deadbee-{suffix}")
         path.write_text(content)
         self._real_tmp_logs.append(str(path))
         return path
@@ -2714,7 +2714,7 @@ class TestBaselineFailureLog:
     The marker and the cached _BR_STATE copy are both parsed off untrusted
     surfaces (the suite's own stdout; a file whose prior write came from that
     same parse), so the launcher's `_bs_validate_log` helper re-validates both
-    against the exact `/tmp/hos-inner-loop-<ts>-<sha>-<rand>.log` shape AND
+    against the exact `/tmp/hos-inner-loop-<ts>-<sha>-<rand>` shape AND
     requires `-f`/`-O` before ever using the value — see
     TestBaselineFailureLogSpoofing for the rejection cases. Positive-path
     tests here use `cron.make_valid_inner_loop_log()`, a real file in the
@@ -2797,7 +2797,9 @@ class TestBaselineFailureLog:
 
         r2 = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
         assert r2.returncode == 0, r2.stdout + r2.stderr
-        assert cron.baseline_run_count() == 1, "identical state must skip the redundant suite re-run"
+        assert (
+            cron.baseline_run_count() == 1
+        ), "identical state must skip the redundant suite re-run"
         assert "skipping redundant re-run" in r2.stdout
         assert f"— log: {fake_log}" in r2.stdout, "cached log path must survive the repeat-skip"
 
@@ -2819,7 +2821,9 @@ class TestBaselineFailureLog:
         fake_log.unlink()
         r2 = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
         assert r2.returncode == 0, r2.stdout + r2.stderr
-        assert cron.baseline_run_count() == 1, "identical state must still skip the redundant suite re-run"
+        assert (
+            cron.baseline_run_count() == 1
+        ), "identical state must still skip the redundant suite re-run"
         assert "skipping redundant re-run" in r2.stdout
         assert "— log:" not in r2.stdout, "swept log file must not be reused"
 
@@ -2871,7 +2875,7 @@ class TestBaselineFailureLogSpoofing:
         """A marker that looks superficially plausible but carries a
         shell-metacharacter payload must be rejected by the anchored regex,
         not merely have the payload survive inertly."""
-        spoofed = "/tmp/hos-inner-loop-20260101T000000Z-abc1234-x`id`.log"
+        spoofed = "/tmp/hos-inner-loop-20260101T000000Z-abc1234-x`id`"
         cron.git_init_repo()
         r = cron.run(
             env_overrides={
@@ -2885,7 +2889,7 @@ class TestBaselineFailureLogSpoofing:
         """A marker matching the regex exactly but pointing at a file that
         was never actually created (the suite lied, or the file was already
         reaped) must fail the `-f` check."""
-        spoofed = "/tmp/hos-inner-loop-20260101T000000Z-abc1234-ZZZZZZ.log"
+        spoofed = "/tmp/hos-inner-loop-20260101T000000Z-abc1234-ZZZZZZ"
         assert not Path(spoofed).exists(), "test precondition: file must not exist"
         cron.git_init_repo()
         r = cron.run(
@@ -2913,7 +2917,9 @@ class TestBaselineFailureLogSpoofing:
 
         r2 = cron.run(env_overrides={"HOS_TEST_INNER_LOOP_EXIT": "1"})
         assert r2.returncode == 0, r2.stdout + r2.stderr
-        assert cron.baseline_run_count() == 1, "identical state must still skip the redundant suite re-run"
+        assert (
+            cron.baseline_run_count() == 1
+        ), "identical state must still skip the redundant suite re-run"
         assert "skipping redundant re-run" in r2.stdout
         assert "/etc/passwd" not in r2.stdout
         assert "— log:" not in r2.stdout

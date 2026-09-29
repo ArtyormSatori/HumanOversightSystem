@@ -29,7 +29,7 @@ for _a in "$@"; do
     _args+=("$_a")
   fi
 done
-set -- "${_args[@]}"
+set -- ${_args[@]+"${_args[@]}"}
 
 case "${1:-}" in
   --help|-h)
@@ -73,7 +73,7 @@ LOG_FILE=""
 if [[ "$FAILURE_LOG" -eq 1 ]]; then
   _ts="$(date -u +%Y%m%dT%H%M%SZ)"
   _sha="$(git rev-parse --short HEAD 2>/dev/null || echo nohead)"
-  if ! LOG_FILE="$(mktemp "/tmp/hos-inner-loop-${_ts}-${_sha}-XXXXXX.log" 2>/dev/null)"; then
+  if ! LOG_FILE="$(mktemp "/tmp/hos-inner-loop-${_ts}-${_sha}-XXXXXX" 2>/dev/null)"; then
     LOG_FILE=""
     echo -e "  ${RED}✘${RESET}  --failure-log: mktemp failed — continuing without a failure log" >&2
   fi

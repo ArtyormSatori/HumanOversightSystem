@@ -11,6 +11,7 @@ created (via the `INNER_LOOP_LOG=` marker, or a before/after glob delta for
 the no-leftover assertions) and removes it in a `finally`, never leaving
 stray `/tmp/hos-inner-loop-*` files behind.
 """
+
 import glob
 import re
 import shutil
@@ -21,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "framework" / "run_tests_inner_loop.sh"
 
 _LOG_GLOB = "/tmp/hos-inner-loop-*"
-_LOG_RE = re.compile(r"^/tmp/hos-inner-loop-\d{8}T\d{6}Z-[0-9a-f]{7,40}-[A-Za-z0-9]+\.log$")
+_LOG_RE = re.compile(r"^/tmp/hos-inner-loop-\d{8}T\d{6}Z-[0-9a-f]{7,40}-[A-Za-z0-9]+$")
 
 
 def _write_exec(path: Path, body: str) -> None:
@@ -42,9 +43,7 @@ def _build_repo(tmp_path: Path) -> Path:
 
     _write_exec(
         fw / "regen_all.sh",
-        "#!/usr/bin/env bash\n"
-        'echo "regen-stub-stdout"\n'
-        'exit "${REGEN_STUB_EXIT:-0}"\n',
+        "#!/usr/bin/env bash\n" 'echo "regen-stub-stdout"\n' 'exit "${REGEN_STUB_EXIT:-0}"\n',
     )
     _write_exec(
         repo / "scripts" / "oversight" / ".venv" / "bin" / "python",
@@ -57,20 +56,34 @@ def _build_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     subprocess.run(
         ["git", "-c", "user.email=test@test.local", "-c", "user.name=test", "add", "-A"],
-        cwd=repo, check=True,
+        cwd=repo,
+        check=True,
     )
     subprocess.run(
-        ["git", "-c", "user.email=test@test.local", "-c", "user.name=test",
-         "commit", "-q", "-m", "sandbox baseline"],
-        cwd=repo, check=True,
+        [
+            "git",
+            "-c",
+            "user.email=test@test.local",
+            "-c",
+            "user.name=test",
+            "commit",
+            "-q",
+            "-m",
+            "sandbox baseline",
+        ],
+        cwd=repo,
+        check=True,
     )
     return repo
 
 
 def _short_sha(repo: Path) -> str:
     return subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=repo,
-        capture_output=True, text=True, check=True,
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
 
 
@@ -80,7 +93,10 @@ def _run(repo: Path, *args: str, env: dict | None = None) -> subprocess.Complete
         full_env.update(env)
     return subprocess.run(
         ["bash", str(repo / "scripts" / "framework" / "run_tests_inner_loop.sh"), *args],
-        cwd=repo, capture_output=True, text=True, env=full_env,
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env=full_env,
     )
 
 
@@ -220,7 +236,9 @@ def test_flag_is_stripped_before_reaching_pytest(tmp_path):
     try:
         result = _run(repo, "-q", "--failure-log", "-x")
         assert result.returncode == 0, result.stdout + result.stderr
-        args_lines = [ln for ln in result.stdout.splitlines() if ln.startswith("pytest-stub-stdout args=")]
+        args_lines = [
+            ln for ln in result.stdout.splitlines() if ln.startswith("pytest-stub-stdout args=")
+        ]
         assert len(args_lines) == 1, result.stdout
         assert "--failure-log" not in args_lines[0]
         assert "-q" in args_lines[0]
@@ -250,7 +268,9 @@ def test_tee_failure_keeps_no_log_and_preserves_exit_code(tmp_path):
     before = _existing_logs()
     try:
         result = _run(
-            repo, "-q", "--failure-log",
+            repo,
+            "-q",
+            "--failure-log",
             env={"PYTEST_STUB_EXIT": "1", "PATH": f"{fake_bin}:/usr/bin:/bin"},
         )
         assert result.returncode == 1, result.stdout + result.stderr
@@ -273,7 +293,9 @@ def test_mktemp_failure_degrades_to_unlogged_run(tmp_path, monkeypatch):
     before = _existing_logs()
     try:
         result = _run(
-            repo, "-q", "--failure-log",
+            repo,
+            "-q",
+            "--failure-log",
             env={"PYTEST_STUB_EXIT": "1", "PATH": f"{fake_bin}:/usr/bin:/bin"},
         )
         assert result.returncode == 1, result.stdout + result.stderr
