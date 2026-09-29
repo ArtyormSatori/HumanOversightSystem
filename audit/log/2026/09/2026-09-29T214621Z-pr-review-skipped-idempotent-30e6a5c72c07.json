@@ -1,0 +1,1 @@
+{"event":"pr-review-skipped-idempotent","head_sha":"63455069018a981baa646a2c0971a06c67e5c1ed","pr":1907,"reason":"#1215 precheck: overseer HUMAN_REQUIRED verdict + escalation thread already posted on this head; no new commits, comments, or reviews since; lint still red, CODEOWNERS review still pending"}
