@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -224,7 +225,18 @@ def test_stdout_is_byte_identical_to_direct_module_invocation():
     direct_doc = json.loads(direct.stdout.splitlines()[0])
     # started_at/ended_at timestamps can legitimately differ by a tick
     # between the two subprocess launches; everything else must match.
+    # observability.audit_record is the per-invocation audit record's path,
+    # which embeds the write-time second and a content hash (the record
+    # includes the timestamp) — the same tick-straddling legitimacy as
+    # started_at/ended_at applies. Assert its shape before nulling it so
+    # normalization can't hide a real regression (e.g. a missing record).
+    audit_record_re = re.compile(
+        r"^\d{4}/\d{2}/\d{4}-\d{2}-\d{2}T\d{6}Z-agent-invocation-[0-9a-f]{12}\.json$"
+    )
     for doc in (wrapper_doc, direct_doc):
         doc["invocation"]["started_at"] = None
         doc["invocation"]["ended_at"] = None
+        audit_record = doc["observability"]["audit_record"]
+        assert audit_record is None or audit_record_re.match(audit_record)
+        doc["observability"]["audit_record"] = None
     assert wrapper_doc == direct_doc
