@@ -1,0 +1,1 @@
+{"event":"human-required","head_sha":"63455069018a981baa646a2c0971a06c67e5c1ed","pr":1907,"reason_category":"FINDINGS_NOT_RESOLVED","review_id":5358822676,"summary":"Required oversight-gate-lint check red (black reformat of 2 test files); protected surface + CODEOWNERS (bin/hos-cron, run_tests_inner_loop.sh) require human approval on the fixed head","tier":"HIGH"}
