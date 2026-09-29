@@ -6,7 +6,8 @@
 # Expected runtime: < 60s.
 #
 # Usage:
-#   ./scripts/framework/run_tests_inner_loop.sh            # run inner-loop tests
+#   ./scripts/framework/run_tests_inner_loop.sh                # run inner-loop tests
+#   ./scripts/framework/run_tests_inner_loop.sh --failure-log   # + keep a full log on failure (#1903)
 #   ./scripts/framework/run_tests_inner_loop.sh --help
 
 set -euo pipefail
@@ -17,12 +18,29 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CYAN="\033[36m"
 RED="\033[31m"; BOLD="\033[1m"; RESET="\033[0m"
 
+# #1903: opt-in --failure-log. May appear anywhere in the args (not just $1);
+# strip it here so the rest pass through to pytest unchanged.
+FAILURE_LOG=0
+_args=()
+for _a in "$@"; do
+  if [[ "$_a" == "--failure-log" ]]; then
+    FAILURE_LOG=1
+  else
+    _args+=("$_a")
+  fi
+done
+set -- ${_args[@]+"${_args[@]}"}
+
 case "${1:-}" in
   --help|-h)
-    echo "Usage: $0 [pytest-args...]"
+    echo "Usage: $0 [--failure-log] [pytest-args...]"
     echo ""
     echo "Runs the inner-loop test suite — all tests except @pytest.mark.slow"
     echo "and @pytest.mark.integration. Required to pass before PR approval."
+    echo ""
+    echo "  --failure-log   On a nonzero exit, keep a full stdout+stderr log in"
+    echo "                  /tmp and print its path as INNER_LOOP_LOG=<path> on"
+    echo "                  stdout. No log is created on a passing run. (#1903)"
     echo ""
     echo "For the full release suite: ./scripts/framework/run_tests_release.sh"
     exit 0
@@ -47,8 +65,54 @@ fi
 
 cd "$REPO_ROOT"
 
-echo -e "  ${CYAN}→${RESET}  Regenerating derived artifacts (SCRIPTS-INDEX.md, CODEOWNERS)..."
-"$SCRIPT_DIR/regen_all.sh"
-echo ""
+# #1903: LOG_FILE stays empty unless --failure-log was passed AND mktemp
+# succeeded. Everything below degrades to the plain (unlogged) path whenever
+# LOG_FILE is empty, so a logging failure never fails the run. Flat in /tmp
+# (not $TMPDIR, no subdirectory) — the host /tmp sweep only deletes files.
+LOG_FILE=""
+if [[ "$FAILURE_LOG" -eq 1 ]]; then
+  _ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  _sha="$(git rev-parse --short HEAD 2>/dev/null || echo nohead)"
+  if ! LOG_FILE="$(mktemp "/tmp/hos-inner-loop-${_ts}-${_sha}-XXXXXX" 2>/dev/null)"; then
+    LOG_FILE=""
+    echo -e "  ${RED}✘${RESET}  --failure-log: mktemp failed — continuing without a failure log" >&2
+  fi
+fi
 
-"$PYTHON" -m pytest -m "not slow and not integration" "$@"
+_run_suite() {
+  echo -e "  ${CYAN}→${RESET}  Regenerating derived artifacts (SCRIPTS-INDEX.md, CODEOWNERS)..."
+  "$SCRIPT_DIR/regen_all.sh" || return $?
+  echo ""
+  "$PYTHON" -m pytest -m "not slow and not integration" "$@"
+}
+
+if [[ -n "$LOG_FILE" ]]; then
+  # Tee everything (regen_all.sh + pytest, both stdout and stderr) to the log
+  # while still showing it on the console exactly as today. set +e/-e around
+  # the pipeline: pipefail alone would trip this script's own set -e before
+  # PIPESTATUS can be read; _run_suite already returns the right code itself
+  # via its explicit `|| return $?` on the regen_all.sh step.
+  set +e
+  _run_suite "$@" 2>&1 | tee "$LOG_FILE"
+  # PIPESTATUS is clobbered by the very next simple command (even a bare
+  # assignment), so both elements must be captured in one shot.
+  _ps=("${PIPESTATUS[@]}")
+  _exit="${_ps[0]}"
+  _tee_exit="${_ps[1]}"
+  set -e
+  if [[ "$_exit" -eq 0 ]]; then
+    rm -f "$LOG_FILE"
+  elif [[ "$_tee_exit" -ne 0 || ! -s "$LOG_FILE" ]]; then
+    # tee itself failed (e.g. disk full) — what's on disk is empty/truncated,
+    # not a usable log. Never claim one exists; the suite's own exit code is
+    # still the one that matters and is preserved below either way.
+    echo -e "  ${RED}✘${RESET}  --failure-log: tee failed — no log kept" >&2
+    rm -f "$LOG_FILE"
+  else
+    echo -e "  ${RED}✘${RESET}  Failure log kept: $LOG_FILE" >&2
+    echo "INNER_LOOP_LOG=$LOG_FILE"
+  fi
+  exit "$_exit"
+fi
+
+_run_suite "$@"

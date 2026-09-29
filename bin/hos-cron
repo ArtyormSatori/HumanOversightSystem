@@ -1551,6 +1551,23 @@ if [[ "$ROLE" == "worker" ]]; then
       done || true
       return 0
     }
+    # #1903: INNER_LOOP_LOG=<path> is parsed off the SAME stdout stream that
+    # carries untrusted test output, and the cached copy in _BR_STATE is just
+    # as untrusted (written from that same parse on a prior cycle) — either
+    # could be spoofed by test output that happens to contain a line shaped
+    # like the marker. Never trust either at face value: validate against the
+    # exact shape run_tests_inner_loop.sh's own mktemp template produces,
+    # AND require the file to actually exist AND be owned by the user this
+    # process runs as. Anything failing any of those degrades to empty —
+    # behaves exactly like no log was captured. One pattern, one helper, both
+    # call sites (fresh parse below, and the repeat-skip cache read) share it.
+    _BS_LOG_PATTERN='^/tmp/hos-inner-loop-[0-9]{8}T[0-9]{6}Z-([0-9a-f]+|nohead)-[A-Za-z0-9]+$'
+    _bs_validate_log() {
+      local _candidate="$1"
+      [[ -n "$_candidate" && "$_candidate" =~ $_BS_LOG_PATTERN \
+            && -f "$_candidate" && -O "$_candidate" ]] && printf '%s' "$_candidate"
+      return 0
+    }
     _BR_STATE="$_HOS_DIR/baseline-red/${ROLE}-${PROJECT}"
     if command -v md5sum &>/dev/null; then
       _bs_fp=$(_bs_fp_stream | md5sum | cut -d' ' -f1)
@@ -1559,21 +1576,44 @@ if [[ "$ROLE" == "worker" ]]; then
     else
       _bs_fp=$(_bs_fp_stream | cksum | awk '{print $1}')
     fi
-    _bs_prev_sha="" _bs_prev_fp="" _bs_prev_exit=""
+    _bs_prev_sha="" _bs_prev_fp="" _bs_prev_exit="" _bs_prev_log=""
     if [[ -f "$_BR_STATE" ]]; then
       _bs_prev_sha=$(sed -n 's/^sha=//p' "$_BR_STATE" 2>/dev/null)
       _bs_prev_fp=$(sed -n 's/^fp=//p' "$_BR_STATE" 2>/dev/null)
       _bs_prev_exit=$(sed -n 's/^exit=//p' "$_BR_STATE" 2>/dev/null)
+      _bs_prev_log=$(sed -n 's/^log=//p' "$_BR_STATE" 2>/dev/null)
     fi
+    _bs_log=""
     if [[ -n "$_CURRENT_HEAD" && "$_CURRENT_HEAD" == "$_bs_prev_sha" \
           && -n "$_bs_fp" && "$_bs_fp" == "$_bs_prev_fp" \
           && "$_bs_prev_exit" =~ ^[0-9]+$ ]]; then
       echo "$LOG_PREFIX INNER-LOOP BASELINE: identical to last recorded failure (HEAD unchanged, worktree unchanged) — skipping redundant re-run (#1498)"
       _audit cycle-baseline-repeat-skip "sha=${_CURRENT_HEAD:0:12}" "exit=${_bs_prev_exit}"
       _bs_exit="$_bs_prev_exit"
+      # #1903: reuse the cached failure log only if it still validates — the
+      # /tmp sweep (or a manual cleanup) may have already reaped it, and the
+      # cached value itself is untrusted (see the helper's comment above).
+      _bs_log="$(_bs_validate_log "$_bs_prev_log")"
     else
       _bs_exit=0
-      bash "$REPO_ROOT/scripts/framework/run_tests_inner_loop.sh" -q 2>/dev/null || _bs_exit=$?
+      # #1903: --failure-log keeps a full log of a red baseline in /tmp; the
+      # suite prints its path on stdout as `INNER_LOOP_LOG=<path>` on failure.
+      # Tee stdout to a scratch file to grep for that marker without changing
+      # what reaches the console/cron log — same PIPESTATUS pattern as
+      # `_run_claude` above, so the function's real exit code survives `set -e`.
+      _bs_stdout_scratch="$(mktemp "${TMPDIR:-/tmp}/hos-cron-baseline-stdout.XXXXXX" 2>/dev/null || echo "")"
+      _bs_run_baseline() {
+        bash "$REPO_ROOT/scripts/framework/run_tests_inner_loop.sh" --failure-log -q 2>/dev/null \
+          | tee "${_bs_stdout_scratch:-/dev/null}"
+        return "${PIPESTATUS[0]}"
+      }
+      _bs_run_baseline || _bs_exit=$?
+      if [[ -n "$_bs_stdout_scratch" ]]; then
+        if [[ -f "$_bs_stdout_scratch" ]]; then
+          _bs_log="$(_bs_validate_log "$(sed -n 's/^INNER_LOOP_LOG=//p' "$_bs_stdout_scratch" | tail -1)")"
+        fi
+        rm -f "$_bs_stdout_scratch"
+      fi
     fi
     _bs_title_prefix="[BLOCKED] inner-loop tests failing on ${PROJECT}"
     _bs_repair_state="$_HOS_DIR/baseline-repair/${ROLE}-${PROJECT}"
@@ -1586,9 +1626,21 @@ if [[ "$ROLE" == "worker" ]]; then
         printf 'sha=%s\n' "${_CURRENT_HEAD}"
         printf 'fp=%s\n' "${_bs_fp}"
         printf 'exit=%s\n' "${_bs_exit}"
+        printf 'log=%s\n' "${_bs_log}"
       } > "$_BR_STATE" 2>/dev/null || true
-      echo "$LOG_PREFIX INNER-LOOP BASELINE TESTS FAILED (exit $_bs_exit)"
-      _audit cycle-preflight-fail "reason=inner_loop_tests_failed exit=$_bs_exit"
+      if [[ -n "$_bs_log" ]]; then
+        printf '%s\n' "$LOG_PREFIX INNER-LOOP BASELINE TESTS FAILED (exit $_bs_exit) — log: $_bs_log"
+      else
+        echo "$LOG_PREFIX INNER-LOOP BASELINE TESTS FAILED (exit $_bs_exit)"
+      fi
+      # #1903: reason=/exit= kept byte-identical to before this feature; the
+      # log path (when present) is a SEPARATE _audit argument so cycle_log.py
+      # records it under its own `log` key rather than folded into `reason`.
+      if [[ -n "$_bs_log" ]]; then
+        _audit cycle-preflight-fail "reason=inner_loop_tests_failed exit=$_bs_exit" "log=$_bs_log"
+      else
+        _audit cycle-preflight-fail "reason=inner_loop_tests_failed exit=$_bs_exit"
+      fi
 
       # #1496: a red baseline is fixable work, no different from any other
       # backlog bug — the worker diagnoses the root cause (test or code, any
@@ -1639,6 +1691,8 @@ if [[ "$ROLE" == "worker" ]]; then
             # #1415: same construction as the legacy body below — with
             # hygiene off/disabled, _HYGIENE_NOTE is empty.
             _bs_body="$(printf 'Cycle-start inner-loop baseline tests are failing on \`%s\` at HEAD \`%s\`. Per #1496, the worker will diagnose whether the test or the code is at fault and fix the root cause through the normal build/PR/review pipeline — no special bypass, any surface (including protected ones) is fair game. Escalates to a human only after %s consecutive cycles without reaching green.\n\nReproduce locally:\n\n    bash scripts/framework/run_tests_inner_loop.sh\n' "$PROJECT" "${_CURRENT_HEAD:-unknown}" "$_bs_max")"
+            # #1903: full stdout+stderr of the failing run, when captured.
+            [[ -n "$_bs_log" ]] && _bs_body="${_bs_body}"$'\n\n'"Full test output: \`${_bs_log}\` (not retained long-term — /tmp is swept by the host; copy it if you need it)."
             [[ -n "$_HYGIENE_NOTE" ]] && _bs_body="${_bs_body}"$'\n\n'"${_HYGIENE_NOTE}"
             if _bs_created=$(gh issue create \
                 --repo "$_REPO_SLUG" \
@@ -1676,8 +1730,11 @@ if [[ "$ROLE" == "worker" ]]; then
           echo "$LOG_PREFIX baseline repair exhausted after ${_bs_attempts} attempts without a green baseline — escalating to human"
           if [[ -n "$_REPO_SLUG" && -n "$_bs_issue_num" ]]; then
             gh issue edit "$_bs_issue_num" --repo "$_REPO_SLUG" --add-label needs-human 2>/dev/null || true
+            _bs_cap_body="Attempt cap (${_bs_max}) reached without a green baseline — escalating to human. See the diagnosis comments posted on this issue each cycle for the round-by-round record."
+            # #1903
+            [[ -n "$_bs_log" ]] && _bs_cap_body="${_bs_cap_body}"$'\n\n'"Full test output: \`${_bs_log}\` (not retained long-term — /tmp is swept by the host; copy it if you need it)."
             gh issue comment "$_bs_issue_num" --repo "$_REPO_SLUG" \
-              --body "Attempt cap (${_bs_max}) reached without a green baseline — escalating to human. See the diagnosis comments posted on this issue each cycle for the round-by-round record." \
+              --body "$_bs_cap_body" \
               2>/dev/null || true
           fi
           exit 1
@@ -1705,10 +1762,12 @@ if [[ "$ROLE" == "worker" ]]; then
               2>/dev/null); then
             _bs_existing="${_bs_existing:-0}"
             if [[ "$_bs_existing" == "0" ]]; then
-              # #1415: the format string and args are UNCHANGED from before this
-              # feature — with hygiene off/disabled, _HYGIENE_NOTE is empty and
-              # _bs_body is byte-identical to the old inline --body value.
+              # #1415: the format string and args are UNCHANGED from before that
+              # feature — with hygiene off/disabled, _HYGIENE_NOTE is empty (the
+              # #1903 log line below is likewise appended only when captured).
               _bs_body="$(printf 'Cycle-start inner-loop baseline tests are failing on \`%s\` at HEAD \`%s\`. The worker is halted — it will not launch Claude or open PRs until the baseline is green.\n\nThis usually means a previous cycle left the repo in a broken state. A human should investigate, fix or revert the breakage, and close this issue (or authorize an AI fix).\n\nReproduce locally:\n\n    bash scripts/framework/run_tests_inner_loop.sh\n' "$PROJECT" "${_CURRENT_HEAD:-unknown}")"
+              # #1903: full stdout+stderr of the failing run, when captured.
+              [[ -n "$_bs_log" ]] && _bs_body="${_bs_body}"$'\n\n'"Full test output: \`${_bs_log}\` (not retained long-term — /tmp is swept by the host; copy it if you need it)."
               [[ -n "$_HYGIENE_NOTE" ]] && _bs_body="${_bs_body}"$'\n\n'"${_HYGIENE_NOTE}"
               gh issue create \
                 --repo "$_REPO_SLUG" \
