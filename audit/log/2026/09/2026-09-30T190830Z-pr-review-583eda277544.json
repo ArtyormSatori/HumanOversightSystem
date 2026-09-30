@@ -1,0 +1,1 @@
+{"composite_score":0.5373,"decision":"BOUNCED","event":"pr-review","expected_action":"NO ACTION","head_sha":"ecb77c834e1805d4df6c44fb21e8e9a3e458bc44","pr":1917,"reason_category":"COMPLIANCE_FAILURE","review_id":5370778569,"tier":"HIGH","tier_floor":"HIGH","tier_source":"worktree run_validators.sh --diff origin/main (composite MEDIUM, tier_floor HIGH)","verdict_event":"comment"}
