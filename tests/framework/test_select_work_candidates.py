@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from typing import Optional
 
 import pytest
 
@@ -42,17 +43,36 @@ def gate_repo(tmp_path, monkeypatch):
     return root
 
 
+# The canonical "no edges, no children" list-record summaries (T3.0a TD §6.1).
+# The live list endpoint always carries both keys, so a fixture without them
+# models a record the API never returns (TD-F2).
+_ZERO_DEPS = {"blocked_by": 0, "blocking": 0, "total_blocked_by": 0, "total_blocking": 0}
+_ZERO_SUBS = {"total": 0, "completed": 0, "percent_completed": 0}
+_OMIT = object()  # sentinel: drop the summary key entirely
+
+
 def _issue(
-    number: int, *labels: str, title: str = "", user: str = "ScottThurlow", user_type: str = "User"
+    number: int,
+    *labels: str,
+    title: str = "",
+    user: str = "ScottThurlow",
+    user_type: str = "User",
+    deps: Optional[dict] = _ZERO_DEPS,
+    subs: Optional[dict] = _ZERO_SUBS,
 ) -> dict:
     names = ["needs-ai", *labels]
-    return {
+    record = {
         "number": number,
         "title": title or f"issue {number}",
         "labels": [{"name": n} for n in names],
         "user": {"login": user, "type": user_type},
         "pull_request": None,
     }
+    if deps is not _OMIT:
+        record["issue_dependencies_summary"] = deps
+    if subs is not _OMIT:
+        record["sub_issues_summary"] = subs
+    return record
 
 
 def _labeled_event(actor: str, label: str = "needs-ai", actor_type: str = "User") -> dict:
@@ -207,12 +227,16 @@ class TestOrderingParity:
                 "number": 10,
                 "title": "no labels key",
                 "user": {"login": "ScottThurlow", "type": "User"},
+                "issue_dependencies_summary": _ZERO_DEPS,
+                "sub_issues_summary": _ZERO_SUBS,
             },
             {
                 "number": 20,
                 "title": "null labels",
                 "labels": None,
                 "user": {"login": "ScottThurlow", "type": "User"},
+                "issue_dependencies_summary": _ZERO_DEPS,
+                "sub_issues_summary": _ZERO_SUBS,
             },
             _issue(5, "priority:high"),
         ]
@@ -1202,7 +1226,7 @@ class TestVisibilityAndAuthorizationLines:
         self, gate_repo, stub, capsys
     ):
         """AM-20: the ALL-CANDIDATES-GATED reasons breakdown enumerates
-        DETERMINATIONS only -- the four unevaluated:* tokens must never
+        DETERMINATIONS only -- the five unevaluated:* tokens must never
         appear in it, even when a query-failed record, a cost-ceiling
         stop, AND a real gated determination all occur in the SAME run
         (they are not mutually exclusive: the ALL-CANDIDATES-GATED
@@ -1239,6 +1263,7 @@ class TestVisibilityAndAuthorizationLines:
             "unevaluated:sufficient",
             "unevaluated:cost-ceiling",
             "unevaluated:query-failed",
+            "unevaluated:edge-summary-unreadable",
         ):
             assert token not in reasons_line
 
@@ -1309,9 +1334,10 @@ class TestSummaryInvariants:
         assert evaluated == eligible + gated
         assert authorized <= eligible
 
-    def test_unevaluated_partition_sums_to_its_three_named_reasons(self, gate_repo, stub, capsys):
-        """Revision 7, TP-3: `unevaluated == sufficient + cost-ceiling +
-        query-failed` exactly. Checked on a fixture where the sufficiency
+    def test_unevaluated_partition_sums_to_its_four_named_reasons(self, gate_repo, stub, capsys):
+        """Revision 7, TP-3 (T3.0a: plus edge-summary-unreadable):
+        `unevaluated == sufficient + cost-ceiling + query-failed +
+        edge-summary-unreadable` exactly. Checked on a fixture where the sufficiency
         stop and a quarantined record are BOTH live in the same run --
         query-failed is per-record and can co-occur with either stop (the
         two stops cannot co-occur with each other, since the walk returns
@@ -1332,7 +1358,8 @@ class TestSummaryInvariants:
         sufficient = int(fields["unevaluated:sufficient"])
         cost_ceiling = int(fields["unevaluated:cost-ceiling"])
         query_failed = int(fields["unevaluated:query-failed"])
-        assert unevaluated == sufficient + cost_ceiling + query_failed
+        edge_unreadable = int(fields["unevaluated:edge-summary-unreadable"])
+        assert unevaluated == sufficient + cost_ceiling + query_failed + edge_unreadable
         assert sufficient > 0
         assert query_failed == 1
 

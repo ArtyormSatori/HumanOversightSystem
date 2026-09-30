@@ -23,6 +23,7 @@ Exit codes (§2.2, AM-32):
 The algorithm's order is part of the contract (§2.3, AM-19/AM-29):
   A args -> B config (incl. LAZY tier resolution) -> C list (PAGINATED)
   D1 drop PR records (free) -> D2 drop EXCLUDED_LABELS (free)
+  D2b drop native-blocked / parent records; set aside unreadable-summary records (free)
   D3 requester_verdict (free) -> D4 trusted -> eligible, zero cost (free)
   D-rank: rank the WHOLE set (free) -- precedes D5, never move it below
   D5: walk the ranked list; pay per untrusted record (events query)
@@ -63,6 +64,17 @@ stranded: the authorizing act may be performed with a personal-access-token
 `gh` invocation under your own login (`gh issue edit <n> --add-label
 needs-ai`, after removing it first if it is already present, since a
 re-applied label produces no new event to verify).
+
+Native GitHub issue dependencies and sub-issues gate selection (ADR-1644
+AD-C4). An issue with any blocking dependency (`blocked by`), open or
+closed, is not selected. An issue that has sub-issues is not selected.
+Neither costs a request, because both are read from the list record. If the
+host does not return these summaries, selection reports DEGRADED (exit 3)
+rather than assume "not blocked". On such a host (for example, a GitHub
+Enterprise Server version without issue dependencies), this happens **on
+every run**, and no new issue work is selected until the host returns them.
+An issue that has sub-issues stays unselected even after all of them close.
+To make it selectable, close it or remove its sub-issue links.
 """
 
 from __future__ import annotations
@@ -99,6 +111,16 @@ from scripts.framework.requester_trust import (
 EXCLUDED_LABELS = ("needs-human",)  # the ADR-1604 AD-5 exclusion landing site
 LIST_PAGE_BOUND = 5  # 500 records (AM-22 / AF-8)
 EVENTS_PAGE_BOUND = 10  # 1000 events (AM-5)
+
+# AD-C4's native-blocker / parent exclusions, in precedence order. The
+# literals are ADR-binding.
+NATIVE_EXCLUSION_REASONS = (
+    "blocked-by-open-issue",
+    "blocker-closed-unverified",
+    "untracked-parent",
+)
+UNEVALUATED_EDGE_SUMMARY = "edge-summary-unreadable"  # the unevaluated sub-reason token
+_EXCLUDED_LIST_BOUND = 20  # same bound as the ALL-CANDIDATES-GATED issue list
 
 _DEFAULT_MAX_CANDIDATES = 5
 _DEFAULT_MAX_API_REQUESTS = 100
@@ -405,11 +427,81 @@ def _label_names(record: dict) -> set:
     return {label.get("name") for label in (record.get("labels") or []) if isinstance(label, dict)}
 
 
-def _apply_free_filters(raw_records: list) -> list:
-    """D1 (drop pull_request records) and D2 (drop EXCLUDED_LABELS), applied
-    BEFORE ranking so the ranked set and the eligible universe are drawn
-    from the same population (§2.3 D5.1 limb (c))."""
-    kept = []
+@dataclass(frozen=True)
+class _NativeVerdict:
+    outcome: str  # "clear" | "excluded" | "unreadable"
+    reason: str  # excluded: a NATIVE_EXCLUSION_REASONS literal; unreadable: the limb; clear: ""
+
+
+@dataclass
+class _FreeFilterResult:
+    kept: list  # survived D1, D2 and D2b, in input order: ranked and walked
+    unreadable: list  # [(number, limb)] in input order: unevaluated, never walked
+    excluded: list  # [(number, reason)] in input order: dropped, reported
+
+
+def _nonneg_int(container: Any, key: str) -> Optional[int]:
+    """The value iff `container` is a dict, `key` is present, and the value is
+    an int (not a bool) >= 0; otherwise None."""
+    if not isinstance(container, dict) or key not in container:
+        return None
+    value = container[key]
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _dependency_counts(record: dict) -> Optional[tuple[int, int]]:
+    """(blocked_by, total_blocked_by) from `issue_dependencies_summary`, or
+    None when the summary is absent, not a dict, has a bad field, or is
+    internally inconsistent (blocked_by > total_blocked_by). `blocking` and
+    `total_blocking` do not bear on whether THIS record may run and are not
+    read."""
+    summary = record.get("issue_dependencies_summary")
+    blocked_by = _nonneg_int(summary, "blocked_by")
+    total_blocked_by = _nonneg_int(summary, "total_blocked_by")
+    if blocked_by is None or total_blocked_by is None or blocked_by > total_blocked_by:
+        return None
+    return blocked_by, total_blocked_by
+
+
+def _sub_issue_total(record: dict) -> Optional[int]:
+    """`sub_issues_summary.total`, or None under the same rules. `completed`
+    and `percent_completed` are not read."""
+    return _nonneg_int(record.get("sub_issues_summary"), "total")
+
+
+def _native_verdict(record: dict) -> _NativeVerdict:
+    """D2b's pure predicate (ADR-1644 AD-C4). Reads exactly two keys of a list
+    record. The rule order is part of the contract: an exclusion wins over an
+    unreadable limb (excluding is always safe), so DEGRADED is kept for records
+    whose selectability is genuinely unknown. For a readable dependency summary
+    0 <= blocked_by <= total_blocked_by, so R1 or R2 holds iff
+    total_blocked_by > 0 whichever count GitHub uses for "open"."""
+    deps = _dependency_counts(record)
+    subs = _sub_issue_total(record)
+    if deps is not None:
+        blocked_by, total_blocked_by = deps
+        if blocked_by > 0:
+            return _NativeVerdict("excluded", NATIVE_EXCLUSION_REASONS[0])
+        if total_blocked_by > blocked_by:
+            return _NativeVerdict("excluded", NATIVE_EXCLUSION_REASONS[1])
+    if subs is not None and subs > 0:
+        return _NativeVerdict("excluded", NATIVE_EXCLUSION_REASONS[2])
+    if deps is None or subs is None:
+        if deps is None and subs is None:
+            return _NativeVerdict("unreadable", "both")
+        return _NativeVerdict("unreadable", "dependencies" if deps is None else "sub-issues")
+    return _NativeVerdict("clear", "")
+
+
+def _apply_free_filters(raw_records: list) -> _FreeFilterResult:
+    """D1 (drop pull_request records), D2 (drop EXCLUDED_LABELS) and D2b
+    (native blockers / parents), applied BEFORE ranking so the ranked set and
+    the eligible universe are drawn from the same population (§2.3 D5.1 limb
+    (c)). D2b must follow D1: PR records carry `None` summaries on the live
+    list endpoint and would otherwise all read as unreadable."""
+    result = _FreeFilterResult(kept=[], unreadable=[], excluded=[])
     for record in raw_records:
         if not isinstance(record, dict):
             continue
@@ -417,8 +509,14 @@ def _apply_free_filters(raw_records: list) -> list:
             continue
         if _label_names(record) & set(EXCLUDED_LABELS):
             continue
-        kept.append(record)
-    return kept
+        verdict = _native_verdict(record)
+        if verdict.outcome == "excluded":
+            result.excluded.append((record.get("number"), verdict.reason))
+        elif verdict.outcome == "unreadable":
+            result.unreadable.append((record.get("number"), verdict.reason))
+        else:
+            result.kept.append(record)
+    return result
 
 
 def _rank(record: dict) -> int:
@@ -570,10 +668,17 @@ def _report_and_exit(
     api_requests: int,
     walk_warn_lines: list,
     ceiling_refused_at_list: bool = False,
+    edge_summary_unreadable: list = (),  # [(number, limb)]
+    excluded: list = (),  # [(number, reason)]
 ) -> int:
     gated_count = sum(gated_reasons.values())
     evaluated = len(eligible) + gated_count
-    unevaluated = unevaluated_sufficient + unevaluated_cost_ceiling + len(query_failed_issues)
+    unevaluated = (
+        unevaluated_sufficient
+        + unevaluated_cost_ceiling
+        + len(query_failed_issues)
+        + len(edge_summary_unreadable)
+    )
     # A Step C page refused by the request ceiling is, on its own, a bound
     # that truncated the candidate set (§2.3 Step C's REFUSED state;
     # revision 8) — complete=no even when nothing was fetched at all
@@ -601,9 +706,22 @@ def _report_and_exit(
             f"unevaluated:cost-ceiling={unevaluated_cost_ceiling}",
             f"unevaluated:query-failed={len(query_failed_issues)}",
             f"unevaluated:list-truncated={'yes' if list_truncated else 'no'}",
+            f"unevaluated:{UNEVALUATED_EDGE_SUMMARY}={len(edge_summary_unreadable)}",
         )
     for issue in query_failed_issues:
         _emit(f"WARN unevaluated:query-failed issue=#{issue}")
+    for issue, limb in edge_summary_unreadable[:_EXCLUDED_LIST_BOUND]:
+        _emit(f"WARN unevaluated:{UNEVALUATED_EDGE_SUMMARY} issue=#{issue} limb={limb}")
+    unreadable_more = len(edge_summary_unreadable) - _EXCLUDED_LIST_BOUND
+    if unreadable_more > 0:
+        _emit(f"WARN unevaluated:{UNEVALUATED_EDGE_SUMMARY} (+{unreadable_more} more)")
+    if edge_summary_unreadable and len(edge_summary_unreadable) == scanned:
+        _emit(
+            f"WARN {UNEVALUATED_EDGE_SUMMARY}-on-every-record n={scanned} —",
+            "the GitHub host may not return issue dependency / sub-issue",
+            "summaries on the list endpoint; selection cannot determine",
+            'blocked-ness (DEGRADED, not "no work")',
+        )
     if cost_ceiling_named_issue is not None:
         _emit(f"unevaluated:cost-ceiling issue=#{cost_ceiling_named_issue}")
         _emit(f"budget-clamped-events-fetch issue=#{cost_ceiling_named_issue}")
@@ -621,6 +739,27 @@ def _report_and_exit(
         _emit(f"WARN tier-resolution-failed tiers={tier_count}")
     if collaborator_bound_reached:
         _emit(f"WARN collaborator-page-bound-reached pages={COLLABORATOR_PAGE_BOUND}")
+
+    if excluded:
+        by_reason = Counter(reason for _, reason in excluded)
+        reason_counts = " ".join(f"{r}={by_reason[r]}" for r in NATIVE_EXCLUSION_REASONS)
+        _emit(
+            f"EXCLUDED {len(excluded)} in-milestone issues are not actionable",
+            f"(not counted in scanned): {reason_counts}",
+        )
+        excluded_str = " ".join(f"#{n}({r})" for n, r in excluded[:_EXCLUDED_LIST_BOUND])
+        excluded_more = len(excluded) - _EXCLUDED_LIST_BOUND
+        if excluded_more > 0:
+            excluded_str += f" (+{excluded_more} more)"
+        _emit(f"EXCLUDED issues: {excluded_str}")
+        closed_unverified = [n for n, r in excluded if r == NATIVE_EXCLUSION_REASONS[1]]
+        for issue in closed_unverified[:_EXCLUDED_LIST_BOUND]:
+            _emit(
+                f"WARN blocker-closed-unverified issue=#{issue} —",
+                "a closed blocker does not unblock until the T3.3 satisfaction",
+                "check exists; a CODEOWNER may remove the dependency edge if",
+                "the blocker is satisfied",
+            )
 
     if not eligible and gated_count > 0:
         _emit(
@@ -708,15 +847,18 @@ def main(argv: Optional[list] = None) -> int:
         _emit("list-query-failed")
         return 2
 
-    candidates_raw = _apply_free_filters(outcome.records)
-    scanned = len(candidates_raw)
+    filtered = _apply_free_filters(outcome.records)
+    candidates_raw = filtered.kept
+    scanned = len(candidates_raw) + len(filtered.unreadable)
     list_truncated = outcome.state == "BOUND-REACHED"
     ceiling_refused_at_list = outcome.state == "REFUSED"
 
     if ceiling_refused_at_list:
         # "The gate does not walk a partial list." Nothing is admitted.
         # Every fetched-and-filtered record counts as unevaluated:cost-ceiling
-        # (§2.3 Step C REFUSED state). No WARN — the ceiling is routine.
+        # (§2.3 Step C REFUSED state). No WARN — the ceiling is routine. D2b
+        # is free and already ran (§2.5): only `kept` records are
+        # cost-ceiling; unreadable ones are their own named reason.
         return _report_and_exit(
             repo=args.repo,
             milestone=args.milestone,
@@ -726,7 +868,7 @@ def main(argv: Optional[list] = None) -> int:
             gated_issue_numbers=[],
             authorized={},
             unevaluated_sufficient=0,
-            unevaluated_cost_ceiling=scanned,
+            unevaluated_cost_ceiling=len(candidates_raw),
             cost_ceiling_named_issue=None,
             query_failed_issues=[],
             list_truncated=False,
@@ -736,6 +878,8 @@ def main(argv: Optional[list] = None) -> int:
             api_requests=budget.spent,
             walk_warn_lines=[],
             ceiling_refused_at_list=True,
+            edge_summary_unreadable=filtered.unreadable,
+            excluded=filtered.excluded,
         )
 
     # D3/D4/D-rank — free, computed over the whole (post-D1/D2) set.
@@ -783,6 +927,8 @@ def main(argv: Optional[list] = None) -> int:
         collaborator_bound_reached=config.collaborator_bound_reached,
         api_requests=budget.spent,
         walk_warn_lines=walk_result.warn_lines,
+        edge_summary_unreadable=filtered.unreadable,
+        excluded=filtered.excluded,
     )
 
 
