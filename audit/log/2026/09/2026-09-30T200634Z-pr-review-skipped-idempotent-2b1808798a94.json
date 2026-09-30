@@ -1,0 +1,1 @@
+{"cycle":"2026-09-30T200559Z","event":"pr-review-skipped-idempotent","head_sha":"986db68c53f45560b9af99260f969fa0aaf9045e","pr":1918,"reason":"already reviewed this head SHA at 2026-09-30T20:00:51Z; decision HUMAN_REQUIRED (protected-surface CLAUDE.md/bootstrap/scripts/framework); needs-human applied; no new commits, comments, or human reviews since"}
