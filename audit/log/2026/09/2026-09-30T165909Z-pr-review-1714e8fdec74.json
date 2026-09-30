@@ -1,0 +1,1 @@
+{"composite_score":0.0112,"decision":"PROPOSE_ONLY","event":"pr-review","expected_action":"NO ACTION","head_sha":"b70a204bfd1bdeade22ed3fe06d69ec40f930319","pr":1916,"review_id":5369410014,"tier":"MEDIUM","tier_floor":null,"tier_source":"self-declared RISK: MEDIUM in TD (validator composite LOW 0.0112, worktree re-run)","verdict_event":"comment"}
