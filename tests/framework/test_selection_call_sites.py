@@ -34,6 +34,12 @@ TRUST_MODULE = ROOT / "scripts" / "framework" / "requester_trust.py"
 # ---------------------------------------------------------------------------
 
 
+def _is_prompt_artifact(rel: Path) -> bool:
+    """A provenance record under `prompts/` is `.md` text, so it cannot be a
+    second implementation; a `.py`/`.sh` dropped there must still fail."""
+    return rel.parts[0] == "prompts" and rel.suffix == ".md"
+
+
 class TestTheCollapse:
     def test_next_candidates_jq_is_gone(self):
         assert not (ROOT / "scripts" / "automation" / "lib" / "next_candidates.jq").exists()
@@ -69,6 +75,12 @@ class TestTheCollapse:
         text = WORKER_AGENT.read_text()
         assert "next_candidates.jq" not in text
 
+    def test_prompt_artifact_allowance_is_markdown_only(self):
+        assert _is_prompt_artifact(Path("prompts/scripts/framework/select_work_candidates.md"))
+        assert not _is_prompt_artifact(Path("prompts/select_work_candidates.py"))
+        assert not _is_prompt_artifact(Path("prompts/select_work_candidates.sh"))
+        assert not _is_prompt_artifact(Path("elsewhere/select_work_candidates.md"))
+
     def test_only_one_selection_entry_point_exists(self):
         """`select_work_candidates` is referenced from exactly the two call
         sites plus tests and docs — never from a second implementation."""
@@ -100,7 +112,7 @@ class TestTheCollapse:
         allowed_exact_files = {Path(".claude") / "agents" / "worker.md"}
         for path in hits:
             rel = path.relative_to(ROOT)
-            if rel in allowed_exact_files:
+            if rel in allowed_exact_files or _is_prompt_artifact(rel):
                 continue
             if len(rel.parts) == 1:
                 assert rel.name in allowed_root_files, f"unexpected reference in {rel}"
