@@ -400,7 +400,7 @@ class TestContractPreserved:
         ]
 
     def test_ex2_excluded_records_are_not_counted_as_gated(self, gate_repo, stub, capsys):
-        stub.issue_pages[1] = [_issue(90, **_BOT), _issue(91, deps=_BLOCKED)]
+        stub.issue_pages[1] = [_issue(90, user=_BOT["user"], user_type=_BOT["user_type"]), _issue(91, deps=_BLOCKED)]
         stub.events_pages[90] = {1: []}
         rc, out, err = run_gate(capsys)
         assert out == []
@@ -432,8 +432,8 @@ class TestContractPreserved:
         """506 query-failed, 505 gated, 504/503 eligible, then the sufficiency
         stop leaves 502/501 unevaluated; 600 is unreadable, 601 excluded."""
         stub.issue_pages[1] = [
-            _issue(506, **_BOT),
-            _issue(505, **_BOT),
+            _issue(506, user=_BOT["user"], user_type=_BOT["user_type"]),
+            _issue(505, user=_BOT["user"], user_type=_BOT["user_type"]),
             _issue(504),
             _issue(503),
             _issue(502),
@@ -571,8 +571,8 @@ class TestNoIdleSelection:
         """Fails if exclusion ever moves after D5: the six untrusted blocked
         records must cost zero `/events` requests."""
         stub.issue_pages[1] = [
-            *[_issue(200 + i, "priority:critical", "needs-human", **_BOT) for i in range(3)],
-            *[_issue(210 + i, "priority:critical", deps=_BLOCKED, **_BOT) for i in range(3)],
+            *[_issue(200 + i, "priority:critical", "needs-human", user=_BOT["user"], user_type=_BOT["user_type"]) for i in range(3)],
+            *[_issue(210 + i, "priority:critical", deps=_BLOCKED, user=_BOT["user"], user_type=_BOT["user_type"]) for i in range(3)],
             _issue(300, "priority:low"),
         ]
         rc, out, err = run_gate(capsys, "--max-candidates", "5")
@@ -633,8 +633,8 @@ def _f0(stub, *, blocked_5: bool = False, parent_4: bool = False) -> None:
         _issue(1),
         _issue(2),
         _issue(3),
-        _issue(4, subs={"total": 1} if parent_4 else _ZERO_SUBS, **_BOT),
-        _issue(5, deps=_BLOCKED if blocked_5 else _ZERO_DEPS, **_BOT),
+        _issue(4, subs={"total": 1} if parent_4 else _ZERO_SUBS, user=_BOT["user"], user_type=_BOT["user_type"]),
+        _issue(5, deps=_BLOCKED if blocked_5 else _ZERO_DEPS, user=_BOT["user"], user_type=_BOT["user_type"]),
     ]
     stub.events_pages[4] = {1: [_labeled_event("ScottThurlow")]}
     stub.events_pages[5] = {1: []}

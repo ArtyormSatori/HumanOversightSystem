@@ -88,7 +88,7 @@ import urllib.parse
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from scripts.framework.requester_trust import (
     COLLABORATOR_PAGE_BOUND,
@@ -668,8 +668,8 @@ def _report_and_exit(
     api_requests: int,
     walk_warn_lines: list,
     ceiling_refused_at_list: bool = False,
-    edge_summary_unreadable: list = (),  # [(number, limb)]
-    excluded: list = (),  # [(number, reason)]
+    edge_summary_unreadable: Sequence[tuple] = (),  # [(number, limb)]
+    excluded: Sequence[tuple] = (),  # [(number, reason)]
 ) -> int:
     gated_count = sum(gated_reasons.values())
     evaluated = len(eligible) + gated_count

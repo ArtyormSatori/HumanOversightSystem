@@ -84,7 +84,7 @@ if stdin is not None:
         f.write(json.dumps({"method": method, "path": path, "body": json.loads(stdin)}) + "\n")
 
 def logged():
-    return [l.strip() for l in open(calls)]
+    return [line.strip() for line in open(calls)]
 
 def fails(key):
     return key in cfg.get("fail", [])
@@ -141,11 +141,11 @@ if method == "GET" and re.fullmatch(r"issues/\d+/events\?per_page=100&page=\d+",
     out(pages.get(p, []))
 
 if method == "GET" and re.fullmatch(r"issues/\d+", rest):
-    n_issue_gets = sum(1 for l in logged() if re.fullmatch(r"GET repos/[^/]+/[^/]+/issues/\d+", l))
+    n_issue_gets = sum(1 for line in logged() if re.fullmatch(r"GET repos/[^/]+/[^/]+/issues/\d+", line))
     if fails("GET issue") or (n_issue_gets >= 2 and fails("GET issue verify")):
         sys.exit(1)
     issue = json.loads(json.dumps(cfg["issue"]))
-    labeled = any(l.startswith("POST ") and l.endswith("/labels") for l in logged())
+    labeled = any(line.startswith("POST ") and line.endswith("/labels") for line in logged())
     if labeled and not cfg.get("label_not_applied"):
         issue["labels"].append({"name": "needs-human"})
     out(issue)
@@ -243,16 +243,16 @@ class Harness:
 
     # -- observations --
     def call_log(self):
-        return [l for l in self.calls.read_text().splitlines() if l]
+        return [line for line in self.calls.read_text().splitlines() if line]
 
     def posts(self):
         return [c for c in self.call_log() if c.startswith("POST ")]
 
     def bodies_sent(self):
-        return [json.loads(l) for l in self.bodies.read_text().splitlines() if l]
+        return [json.loads(line) for line in self.bodies.read_text().splitlines() if line]
 
     def audits(self):
-        return [json.loads(l) for l in self.audit.read_text().splitlines() if l]
+        return [json.loads(line) for line in self.audit.read_text().splitlines() if line]
 
     def capture_text(self):
         return self.capture.read_text()
@@ -394,8 +394,8 @@ def test_esc7_key_is_deterministic_and_input_sensitive(tmp_path):
         assert r.returncode == 0, r.stderr
         return _key_of(r)
 
-    (tmp_path / "a").mkdir(), (tmp_path / "b").mkdir(), (tmp_path / "c").mkdir()
-    (tmp_path / "d").mkdir(), (tmp_path / "e").mkdir()
+    for d in "abcde":
+        (tmp_path / d).mkdir()
     k1, k2 = run("a"), run("b")
     assert k1 == k2 == expected_key(7, "awaiting-human-answer", b"Q one\n")
     assert run("c", body=b"Q onf\n") != k1
@@ -636,7 +636,7 @@ def test_esc21_static_script_properties():
     assert "--field" not in text and "--raw-field" not in text
     assert "body=@" not in text
     assert "gh issue edit" not in text and "gh issue comment" not in text
-    api_lines = [l for l in text.splitlines() if re.search(r"\bgh api\b", l) and not l.lstrip().startswith("#")]
+    api_lines = [line for line in text.splitlines() if re.search(r"\bgh api\b", line) and not line.lstrip().startswith("#")]
     assert api_lines
     for line in api_lines:
         assert not re.search(r"\s-[fF]\s", line), line
