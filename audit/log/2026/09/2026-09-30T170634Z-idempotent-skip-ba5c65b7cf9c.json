@@ -1,0 +1,1 @@
+{"event":"idempotent-skip","head_sha":"b70a204bfd1bdeade22ed3fe06d69ec40f930319","pr":1916,"prior_decision":"PROPOSE_ONLY","reason":"#1215 precheck: overseer verdict review 5369410014 already posted on this head; no new commits, comments, or reviews since"}
