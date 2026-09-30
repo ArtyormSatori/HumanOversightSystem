@@ -57,7 +57,7 @@ audit_write_event() {
 }
 """
 
-GH_STUB = r'''#!/usr/bin/env python3
+GH_STUB = r"""#!/usr/bin/env python3
 import json, os, re, sys
 cfg = json.load(open(os.environ["GH_CFG"]))
 calls = os.environ["CALLS_FILE"]
@@ -151,7 +151,7 @@ if method == "GET" and re.fullmatch(r"issues/\d+", rest):
     out(issue)
 
 sys.exit(1)
-'''
+"""
 
 
 def _write_exec(path: Path, body: str) -> None:
@@ -160,7 +160,9 @@ def _write_exec(path: Path, body: str) -> None:
 
 
 def expected_key(number, reason, body: bytes) -> str:
-    h = hashlib.sha256(b"hos-escalation-v1\0" + str(number).encode() + b"\0" + reason.encode() + b"\0" + body)
+    h = hashlib.sha256(
+        b"hos-escalation-v1\0" + str(number).encode() + b"\0" + reason.encode() + b"\0" + body
+    )
     return h.hexdigest()[:16]
 
 
@@ -174,8 +176,16 @@ def issue(labels=("needs-ai",), state="open", **extra):
     return d
 
 
-def own_comment(n=7, reason="awaiting-human-answer", body=b"Question?\n", cid=900,
-                login=BOT, utype="Bot", created="2026-09-30T10:00:00Z", updated=None):
+def own_comment(
+    n=7,
+    reason="awaiting-human-answer",
+    body=b"Question?\n",
+    cid=900,
+    login=BOT,
+    utype="Bot",
+    created="2026-09-30T10:00:00Z",
+    updated=None,
+):
     return {
         "id": cid,
         "user": {"login": login, "type": utype},
@@ -225,8 +235,16 @@ class Harness:
     def run(self, args=None, env=None):
         self.cfg_path.write_text(json.dumps(self.cfg))
         if args is None:
-            args = ["--number", "7", "--body-file", str(self.body_path),
-                    "--reason", "awaiting-human-answer", "--app", "worker"]
+            args = [
+                "--number",
+                "7",
+                "--body-file",
+                str(self.body_path),
+                "--reason",
+                "awaiting-human-answer",
+                "--app",
+                "worker",
+            ]
         e = {
             "PATH": f"{self.stub_bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
             "CAPTURE_FILE": str(self.capture),
@@ -239,7 +257,9 @@ class Harness:
         }
         if env:
             e.update(env)
-        return subprocess.run([BASH, str(self.script), *args], capture_output=True, text=True, env=e)
+        return subprocess.run(
+            [BASH, str(self.script), *args], capture_output=True, text=True, env=e
+        )
 
     # -- observations --
     def call_log(self):
@@ -269,8 +289,18 @@ def h(tmp_path):
     return Harness(tmp_path)
 
 
-AUDIT_KEYS = {"event", "issue", "reason", "key", "outcome", "comment_id", "app", "actor",
-              "label_present_before", "timestamp"}
+AUDIT_KEYS = {
+    "event",
+    "issue",
+    "reason",
+    "key",
+    "outcome",
+    "comment_id",
+    "app",
+    "actor",
+    "label_present_before",
+    "timestamp",
+}
 
 
 def _short(call):
@@ -280,8 +310,12 @@ def _short(call):
 # ── T-ESC1..4: validation, before any mint ───────────────────────────────────
 @pytest.mark.parametrize("drop", ["--number", "--body-file", "--reason", "--app"])
 def test_esc1_each_missing_flag_exits_2(h, drop):
-    full = {"--number": "7", "--body-file": str(h.body_path),
-            "--reason": "awaiting-human-answer", "--app": "worker"}
+    full = {
+        "--number": "7",
+        "--body-file": str(h.body_path),
+        "--reason": "awaiting-human-answer",
+        "--app": "worker",
+    }
     args = [x for k, v in full.items() if k != drop for x in (k, v)]
     r = h.run(args)
     assert r.returncode == 2
@@ -289,19 +323,34 @@ def test_esc1_each_missing_flag_exits_2(h, drop):
 
 
 def test_esc2_body_flag_rejected(h):
-    r = h.run(["--number", "7", "--body", "hi", "--reason", "awaiting-human-answer", "--app", "worker"])
+    r = h.run(
+        ["--number", "7", "--body", "hi", "--reason", "awaiting-human-answer", "--app", "worker"]
+    )
     assert r.returncode == 2
     assert "--body is not supported" in r.stderr and "--body-file" in r.stderr
     assert not h.minted()
 
 
-@pytest.mark.parametrize("flag,val", [
-    ("--app", "robot"), ("--number", "abc"), ("--number", "0"), ("--number", "07"),
-    ("--reason", "Bad"), ("--reason", "x"), ("--reason", "a" * 65), ("--reason", "a_b"),
-])
+@pytest.mark.parametrize(
+    "flag,val",
+    [
+        ("--app", "robot"),
+        ("--number", "abc"),
+        ("--number", "0"),
+        ("--number", "07"),
+        ("--reason", "Bad"),
+        ("--reason", "x"),
+        ("--reason", "a" * 65),
+        ("--reason", "a_b"),
+    ],
+)
 def test_esc3_bad_values_exit_2(h, flag, val):
-    args = {"--number": "7", "--body-file": str(h.body_path),
-            "--reason": "awaiting-human-answer", "--app": "worker"}
+    args = {
+        "--number": "7",
+        "--body-file": str(h.body_path),
+        "--reason": "awaiting-human-answer",
+        "--app": "worker",
+    }
     args[flag] = val
     r = h.run([x for k, v in args.items() for x in (k, v)])
     assert r.returncode == 2
@@ -312,7 +361,9 @@ def test_esc3_unknown_flag_exits_2(h):
     assert h.run(["--bogus", "1"]).returncode == 2
 
 
-@pytest.mark.parametrize("kind", ["missing", "empty", "whitespace", "at-path", "marker", "oversize"])
+@pytest.mark.parametrize(
+    "kind", ["missing", "empty", "whitespace", "at-path", "marker", "oversize"]
+)
 def test_esc4_bad_body_exits_2(h, kind):
     path = h.body_path
     if kind == "missing":
@@ -327,8 +378,18 @@ def test_esc4_bad_body_exits_2(h, kind):
         h.set_body(b"hello\n<!-- hos-escalation v=1 reason=x key=0 -->\n")
     elif kind == "oversize":
         h.set_body(b"a" * 65000)
-    r = h.run(["--number", "7", "--body-file", str(path),
-               "--reason", "awaiting-human-answer", "--app", "worker"])
+    r = h.run(
+        [
+            "--number",
+            "7",
+            "--body-file",
+            str(path),
+            "--reason",
+            "awaiting-human-answer",
+            "--app",
+            "worker",
+        ]
+    )
     assert r.returncode == 2, r.stderr
     assert not h.minted() and h.call_log() == []
 
@@ -340,11 +401,14 @@ def test_esc4_body_at_the_limit_is_accepted(h):
 
 
 # ── T-ESC5: target preconditions ─────────────────────────────────────────────
-@pytest.mark.parametrize("target", [
-    issue(pull_request={"url": "x"}),
-    issue(state="closed"),
-    issue(labels=("needs-ai", "release-request")),
-])
+@pytest.mark.parametrize(
+    "target",
+    [
+        issue(pull_request={"url": "x"}),
+        issue(state="closed"),
+        issue(labels=("needs-ai", "release-request")),
+    ],
+)
 def test_esc5_refused_targets_make_no_post(h, target):
     h.cfg["issue"] = target
     r = h.run()
@@ -375,7 +439,8 @@ def test_esc6_happy_path_order(h):
     key = expected_key(7, "awaiting-human-answer", h.body_bytes)
     assert r.stdout.strip() == (
         f"escalated issue=#7 outcome=escalated reason=awaiting-human-answer key={key} "
-        "comment=https://github.com/test-owner/test-repo/issues/7#issuecomment-555")
+        "comment=https://github.com/test-owner/test-repo/issues/7#issuecomment-555"
+    )
 
 
 # ── T-ESC7: key determinism ──────────────────────────────────────────────────
@@ -389,8 +454,18 @@ def test_esc7_key_is_deterministic_and_input_sensitive(tmp_path):
         hh.set_body(body)
         hh.cfg["issue"] = issue()
         hh.cfg["issue"]["number"] = int(number)
-        r = hh.run(["--number", number, "--body-file", str(hh.body_path),
-                    "--reason", reason, "--app", "worker"])
+        r = hh.run(
+            [
+                "--number",
+                number,
+                "--body-file",
+                str(hh.body_path),
+                "--reason",
+                reason,
+                "--app",
+                "worker",
+            ]
+        )
         assert r.returncode == 0, r.stderr
         return _key_of(r)
 
@@ -425,8 +500,15 @@ def test_esc9_label_repair_posts_only_labels(h):
 
 def test_esc10_superseded_exit_6_no_posts(h):
     h.cfg["comments_pages"] = {"1": [own_comment(body=h.body_bytes)]}
-    h.cfg["events_pages"] = {"1": [{"event": "unlabeled", "label": {"name": "needs-human"},
-                                    "created_at": "2026-09-30T11:00:00Z"}]}
+    h.cfg["events_pages"] = {
+        "1": [
+            {
+                "event": "unlabeled",
+                "label": {"name": "needs-human"},
+                "created_at": "2026-09-30T11:00:00Z",
+            }
+        ]
+    }
     r = h.run()
     assert r.returncode == 6
     assert h.posts() == []
@@ -436,8 +518,15 @@ def test_esc10_superseded_exit_6_no_posts(h):
 
 def test_esc10_earlier_unlabel_does_not_supersede(h):
     h.cfg["comments_pages"] = {"1": [own_comment(body=h.body_bytes)]}
-    h.cfg["events_pages"] = {"1": [{"event": "unlabeled", "label": {"name": "needs-human"},
-                                    "created_at": "2026-09-30T09:00:00Z"}]}
+    h.cfg["events_pages"] = {
+        "1": [
+            {
+                "event": "unlabeled",
+                "label": {"name": "needs-human"},
+                "created_at": "2026-09-30T09:00:00Z",
+            }
+        ]
+    }
     assert h.run().returncode == 0
 
 
@@ -468,9 +557,16 @@ def test_esc12_edited_marker_comment_is_reposted(h):
 
 
 def test_esc13_marker_on_page_2_is_found(h):
-    filler = [{"id": i, "user": {"login": "x", "type": "User"}, "body": "hi",
-               "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}
-              for i in range(100)]
+    filler = [
+        {
+            "id": i,
+            "user": {"login": "x", "type": "User"},
+            "body": "hi",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+        for i in range(100)
+    ]
     h.cfg["issue"] = issue(labels=("needs-ai", "needs-human"))
     h.cfg["comments_pages"] = {"1": filler, "2": [own_comment(body=h.body_bytes)]}
     r = h.run()
@@ -480,9 +576,16 @@ def test_esc13_marker_on_page_2_is_found(h):
 
 
 def test_esc13_comment_page_bound_warns_and_records(h):
-    full = [{"id": i, "user": {"login": "x", "type": "User"}, "body": "hi",
-             "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:00:00Z"}
-            for i in range(100)]
+    full = [
+        {
+            "id": i,
+            "user": {"login": "x", "type": "User"},
+            "body": "hi",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+        for i in range(100)
+    ]
     h.cfg["comments_pages"] = {str(p): full for p in range(1, 31)}
     r = h.run()
     assert r.returncode == 0, r.stderr
@@ -506,9 +609,14 @@ def test_esc14_response_without_id_exit_4(h):
     assert not any(c.endswith("/labels") for c in h.call_log())
 
 
-@pytest.mark.parametrize("readback", [
-    {"login": "intruder"}, {"type": "User"}, {"strip_marker": True},
-])
+@pytest.mark.parametrize(
+    "readback",
+    [
+        {"login": "intruder"},
+        {"type": "User"},
+        {"strip_marker": True},
+    ],
+)
 def test_esc15_unconfirmed_readback_exit_4_no_label(h, readback):
     h.cfg["readback"] = readback
     r = h.run()
@@ -521,9 +629,11 @@ def test_esc16_label_post_failure_exit_5_with_repair_line(h):
     h.cfg["fail"] = ["POST labels"]
     r = h.run()
     assert r.returncode == 5
-    assert ("escalate_to_human: REPAIR — re-run the identical command; the question is recorded at "
-            "https://github.com/test-owner/test-repo/issues/7#issuecomment-555 but needs-human is NOT "
-            "applied, so the issue is still selectable") in r.stderr
+    assert (
+        "escalate_to_human: REPAIR — re-run the identical command; the question is recorded at "
+        "https://github.com/test-owner/test-repo/issues/7#issuecomment-555 but needs-human is NOT "
+        "applied, so the issue is still selectable"
+    ) in r.stderr
     assert h.audits()[0]["outcome"] == "partial"
 
 
@@ -606,8 +716,15 @@ def test_esc20_revoke_on_exit_5(h):
 
 def test_esc20_revoke_on_exit_6(h):
     h.cfg["comments_pages"] = {"1": [own_comment(body=h.body_bytes)]}
-    h.cfg["events_pages"] = {"1": [{"event": "unlabeled", "label": {"name": "needs-human"},
-                                    "created_at": "2026-09-30T11:00:00Z"}]}
+    h.cfg["events_pages"] = {
+        "1": [
+            {
+                "event": "unlabeled",
+                "label": {"name": "needs-human"},
+                "created_at": "2026-09-30T11:00:00Z",
+            }
+        ]
+    }
     assert h.run().returncode == 6 and h.revoked()
 
 
@@ -636,7 +753,11 @@ def test_esc21_static_script_properties():
     assert "--field" not in text and "--raw-field" not in text
     assert "body=@" not in text
     assert "gh issue edit" not in text and "gh issue comment" not in text
-    api_lines = [line for line in text.splitlines() if re.search(r"\bgh api\b", line) and not line.lstrip().startswith("#")]
+    api_lines = [
+        line
+        for line in text.splitlines()
+        if re.search(r"\bgh api\b", line) and not line.lstrip().startswith("#")
+    ]
     assert api_lines
     for line in api_lines:
         assert not re.search(r"\s-[fF]\s", line), line
