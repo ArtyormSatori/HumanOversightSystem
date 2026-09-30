@@ -1145,3 +1145,56 @@ acknowledgement.
 - no sign-off register entry, because that is not the architect's role and nothing is built;
 - no issue filed, no comment posted, no label changed;
 - ADR-1643 and ADR-1604 are not edited.
+
+---
+
+## Erratum 1 (2026-09-30): T3.0a technical-design review, round 1
+
+Raised by the architect's review of `docs/v0.7.0/TECHNICAL-DESIGN-1644-T3.0a-no-idle-selection.md`
+(DRAFT-1). **No decision above is rewritten.** Each item below corrects a slice boundary or records a
+consequence. Where an item conflicts with the text above, the item governs.
+
+- **E1 (§5 T3.0a and T3.2 rows; AD-C6 required tests).** §5 listed "T-NS1 to T-NS4" in T3.0a. T-NS2
+  asserts in-flight-first ordering, which is T3.2's content: it needs AD-C4's stage parse, and that needs
+  AD-C1's registry (T3.1). So:
+  - **T3.0a's gate is T-NS1, T-NS3 and T-NS4.**
+  - **T-NS2 is a T3.2 gate test.**
+  - T3.0a ships T-NS2 as `xfail(strict=True, raises=AssertionError)`. T3.2 must remove the marker, and a
+    strict XPASS forces it to.
+  - T3.2 must also re-run T-NS3 with the six blocked items **in-flight** (carrying stage labels) and the
+    eligible item **new**, under the new walk key `(inflight_class, rank, -number)`. In T3.0a, T-NS3 can
+    only exercise the cut by priority.
+- **E2 (AD-C4, missing summary).** Confirmed consequence: on a host whose list endpoint never returns
+  `issue_dependencies_summary`/`sub_issues_summary`, **every** record is unevaluated. The selector is then
+  DEGRADED (exit 3) on every cycle, and no new issue work is selected there. This is the intended
+  fail-closed outcome. It gets no configuration knob. It is stated in the selector's shipped docstring.
+- **E3 (AD-C4, parents).** Confirmed reading: `sub_issues_summary.total` counts closed children, so a
+  parent stays excluded (`untracked-parent`) after all its children close. Before T3.2, the human remedy
+  is to close the parent or remove its sub-issue links.
+- **E4 (T3.6 scope; AD-C10 "one code path").** T3.6 gains the following, and its TD must list every
+  issue-side `needs-human` writer and say, for each, whether it migrates or why it does not:
+  - migration of the pre-existing **label-first** escalation sites onto `bootstrap/escalate_to_human.sh`:
+    `bin/hos-cron:1732-1739` (baseline-repair cap) and `.claude/agents/worker.md:291-295`
+    (baseline-repair "cannot determine" step);
+  - the `worker.md` instruction that human waits go through that script.
+
+  Out by name:
+  - `merge_authority.py::route_embargo` (an embargo, not a question);
+  - NG3b R4 step 0b (a `release-request` issue, which the script refuses).
+
+  `worker.md` edits remain top-level-session-authored (#1347).
+- **E5 (AD-C7 scope).** AD-C7's "envelope record, no new mechanism" rule governs **round and stage
+  records**. `escalate_to_human.sh`'s HTML-comment idempotency marker (`<!-- hos-escalation v=1 … -->`)
+  is a write-primitive key, not a record format. It follows the `release_panel_logic.py` marker precedent.
+  - The AD-C10 escalation record's format is T3.6's, carried inside the body its caller passes.
+  - T3.6 must check `envelope.py`'s `DEFAULT_ACK_PATTERNS` before putting an envelope in a *question*
+    body, because `---hos-envelope` is itself an "answer exists" pattern.
+
+**Startup-gap analysis.**
+- **E1: yes, and it is minor.** The slice table should have matched the tests to the slice contents.
+  Nothing has been built or signed off against the T3.0a row, so **no sign-off is affected**.
+- **E2 and E3:** not new decisions. They are consequences of AD-C4 as written. No sign-off is affected.
+- **E4 and E5:** they widen or clarify slices that are unbuilt (T3.6) or in design (T3.0a). No sign-off is
+  affected.
+
+No `startup-artifact-gap` issue is recommended for this erratum.
