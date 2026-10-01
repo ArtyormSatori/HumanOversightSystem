@@ -54,15 +54,20 @@ def _write_exec(path: Path, body: str) -> None:
 def _candidates_json(*issues: tuple) -> str:
     """Build a GitHub list-issues response body for the needs-ai gh stub.
 
-    Each issue is ``(number, title, [label, ...])``. The shape must match
-    what `scripts.framework.select_work_candidates` consumes — a JSON array
-    of objects with ``number``, ``title``, ``labels: [{"name": ...}]`` and a
-    ``user``. The author defaults to the CODEOWNER this fixture's
-    `.github/CODEOWNERS` names (`ScottThurlow`), so a fixture built with this
-    helper is selectable at ZERO extra API cost (D4, free) without every
-    existing test also having to stub an events fetch — the trust dimension
-    is orthogonal to what these tests are about (#1540 S2).
+    Each issue is ``(number, title, [label, ...])`` with an optional 4th
+    element: a dict overriding ``issue_dependencies_summary`` (T-HC1). The
+    shape must match what `scripts.framework.select_work_candidates` consumes —
+    a JSON array of objects with ``number``, ``title``, ``labels: [{"name":
+    ...}]``, a ``user`` and the two native-edge summaries the live list
+    endpoint always carries (zeroed by default: no blockers, no children; an
+    absent summary would read as unevaluated/DEGRADED, T3.0a AD-C4). The
+    author defaults to the CODEOWNER this fixture's `.github/CODEOWNERS` names
+    (`ScottThurlow`), so a fixture built with this helper is selectable at
+    ZERO extra API cost (D4, free) without every existing test also having to
+    stub an events fetch — the trust dimension is orthogonal to what these
+    tests are about (#1540 S2).
     """
+    zero_deps = {"blocked_by": 0, "blocking": 0, "total_blocked_by": 0, "total_blocking": 0}
     return json.dumps(
         [
             {
@@ -70,8 +75,10 @@ def _candidates_json(*issues: tuple) -> str:
                 "title": title,
                 "labels": [{"name": name} for name in labels],
                 "user": {"login": "ScottThurlow", "type": "User"},
+                "issue_dependencies_summary": rest[0] if rest else zero_deps,
+                "sub_issues_summary": {"total": 0, "completed": 0, "percent_completed": 0},
             }
-            for number, title, labels in issues
+            for number, title, labels, *rest in issues
         ]
     )
 
@@ -3565,6 +3572,33 @@ class TestActionableWorkGate:
             "#700 [low] No priority label",
         ], rendered
         assert "#800" not in section
+
+    def test_natively_blocked_candidate_never_reaches_the_worker(self, cron):
+        """T-HC1 (T3.0a): the one test that runs the real `bin/hos-cron` path
+        against a natively blocked issue (ADR-1644 §0: no behavior had been
+        run under the launcher). #10 carries `blocked_by=1` and must be
+        excluded from the prompt's candidate block even though it outranks
+        #11; the selector's EXCLUDED line passes through on stderr."""
+        stdin_capture = cron.capture_claude_stdin()
+        blocked = {"blocked_by": 1, "blocking": 0, "total_blocked_by": 1, "total_blocking": 0}
+        r = cron.run(
+            env_overrides={
+                "HOS_TEST_MILESTONELESS_ISSUES": "",
+                "HOS_TEST_OPEN_PR_NUMS": "",
+                "HOS_TEST_ISSUE_CANDIDATES_JSON": _candidates_json(
+                    (10, "blocked", ["needs-ai", "priority:critical"], blocked),
+                    (11, "free", ["needs-ai"]),
+                ),
+                "HOS_TARGET_RELEASE": "v0.6.1",
+                "HOS_TARGET_MILESTONE_NUMBER": "7",
+            }
+        )
+        assert r.returncode == 0, r.stdout + r.stderr
+        section = stdin_capture.read_text().split("### Next work candidates", 1)[1]
+        rendered = [ln for ln in section.splitlines() if ln.startswith("#")]
+        assert rendered == ["#11 [low] free"], rendered
+        assert "#10" not in section
+        assert "EXCLUDED issues: #10(blocked-by-open-issue)" in r.stderr
 
     def test_query_failure_does_not_skip(self, cron):
         """A query failure is "unknown", never "empty" — it must never cause a

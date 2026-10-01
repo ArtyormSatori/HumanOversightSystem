@@ -101,6 +101,8 @@ python3 -m scripts.framework.select_work_candidates --repo thurlow-research/Huma
 ```
 This command is the **only** sanctioned way to produce work candidates (#1540 S2, AD-3). **If it exits non-zero — 2 or 3 — there are no candidates for you this cycle.** Exit 2 means it failed closed. Exit 3 means it could not determine the full candidate set and is telling you so rather than pretending the queue is empty; **in neither case does "no output" mean "there is no work"**, and in neither case are you to go looking for some. Do NOT construct your own query, do NOT fall back to `gh api`, do NOT read the issue list by any other means, and do NOT pick an issue from the Step 0 triage list. STOP after Steps 0/0.5/1.
 
+**Recording a wait on a human answer:** if an issue cannot proceed until a human answers a question, you MUST record that wait with `bash bootstrap/escalate_to_human.sh --number <N> --body-file <path> --reason awaiting-human-answer --app worker` (the body file holds the question). It posts the question, then applies the `needs-human` label, so the selector stops choosing the issue. A wait stated only in prose, or a comment with no label, leaves the issue selectable and the next cycle will pick it again (#1644). Retry an exit 4 or 5 with the identical command.
+
 **Batching:** May batch closely-related issues (same files, coherent unit, ≤15 files/10 commits).
 
 **Step 2b — Create this cycle's working branch:**
