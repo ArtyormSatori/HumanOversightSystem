@@ -1,0 +1,1 @@
+{"event":"pr-review-skipped-idempotent","head_sha":"ad7c052884adc9047ab7b0f5899f5546d04235cf","pr":1921,"prior_review_id":5376627591,"reason":"§1215: no new commits, comments or reviews since overseer verdict 08:08Z on this head; needs-human present, awaiting human approval (protected surface bootstrap/**, CLAUDE.md)"}
