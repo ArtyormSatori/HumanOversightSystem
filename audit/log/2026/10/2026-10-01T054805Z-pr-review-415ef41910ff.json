@@ -1,0 +1,1 @@
+{"agent":"overseer","decision":"PROPOSE_ONLY","event":"pr-review","head_sha":"f29576ac5914a26b0f0f4a2aefa14337e8a65a3d","pr":1919,"protected_surface":false,"summary":"Docs-only T3.3a TD; composite LOW floored HIGH by diff_size; matrix PROPOSE_ONLY (DEP #152-followup); needs-ai withheld (#1557)","tier":"HIGH","verdict_review_id":5375437495}
