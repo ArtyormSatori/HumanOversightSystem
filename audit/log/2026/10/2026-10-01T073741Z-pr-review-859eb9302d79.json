@@ -1,0 +1,1 @@
+{"agent":"overseer","decision":"BOUNCED","event":"pr-review","head_sha":"54f8accd070d3c00f780deed98b9397ec492fbb5","pr":1920,"protected_surface":true,"summary":"Step 4c bounce #1: required oversight-gate-lint red (E501/black in test_query_issues.py) + shellcheck SC2034 dead NEED_WRITE; matrix not applied; tests pending at review","tier":"HIGH","verdict_review_id":5376304948}
