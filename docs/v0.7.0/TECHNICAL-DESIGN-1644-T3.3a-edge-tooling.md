@@ -1,7 +1,7 @@
 # TECHNICAL DESIGN — #1644 slice T3.3a: edge tooling (canonical scripts for sub-issue links and `blocked_by` dependency edges; the #1352 pull-forward)
 
-**Status:** DRAFT-1 + architect round-1 edits. **Architect round 1 of 5: APPROVED_WITH_EDITS** (see the
-final section). Cleared for `coder` handoff with the edits applied. The V-LIVE authorization (§9) is
+**Status:** DRAFT-1 + architect round-1 and round-2 edits. **Architect round 1 of 5: APPROVED_WITH_EDITS;
+round 2 of 5 (independent re-review after commit adoption): APPROVED_WITH_EDITS** (see the final sections). Cleared for `coder` handoff with the edits applied. The V-LIVE authorization (§9) is
 not a handoff blocker.
 **Date:** 2026-10-01
 **Author:** technical-design
@@ -318,7 +318,9 @@ Reads cover both directions (§4).
 
 ### 3.3 Environment and pattern (copied from `escalate_to_human.sh`)
 
-- `set -euo pipefail`. `SCRIPT_DIR`, `err` and `warn` are as in the siblings.
+- `set -euo pipefail`. `SCRIPT_DIR`, `err` and `warn` are as in the siblings. **Every exit-2 path goes
+  through a `refuse` helper** (the `escalate_to_human.sh:62-66` precedent), never `err`, because the
+  siblings' `err` exits 1. *(Architect round 2, edit B2.)*
 - The repo slug comes from `git -C "$SCRIPT_DIR/.." remote get-url origin`, with the siblings' `sed`.
   A failure exits 1, as in the siblings.
 - **One mint:** `bash "$SCRIPT_DIR/get_app_token.sh" --app <role>` into a `mktemp` file, which is
@@ -401,7 +403,7 @@ edit A2.)*
 
 | V result | Exit | Token / outcome |
 |---|---|---|
-| V read failed (transient, malformed, or page bound) | **4** | `unverified verify-read-failed http=<W_STATUS>` |
+| V read failed: **any** non-`ok` class (transient, `not-found`, `rejected`), a malformed body, the page bound, or (parent flags) a `parent_issue_url` that is neither absent/`null` nor a parseable URL *(round 2, edit B1)* | **4** | `unverified verify-read-failed http=<W_STATUS>` |
 | The requested state holds | **0** | `added` / `removed`. This covers both W 2xx and a W failure where the state landed anyway (a lost response, or a concurrent identical write). |
 | `--add-parent` and V shows a **different** parent | **6** | `has-other-parent current=<ref>` (a race with another actor) |
 | The state does not hold, and `W_CLASS` ∈ {`rejected`, `not-found`} | **2** | `write-rejected http=<W_STATUS> message=<sanitized>` |
@@ -480,6 +482,10 @@ the selector's DEGRADED. There is no 5 because a single-write operation has no p
 **stderr** gets one line on every non-zero exit:
 `edit_issue_edges: <token> kind=<sub-issue|blocked-by> op=<add|remove> issue=#<N> other=#<M> [<k=v> …]`.
 It carries numbers and fixed tokens only. The `warn` helper's revoke and audit warnings may add lines.
+Pre-mint usage refusals, where `issue`/`other` may not be valid numbers, use the form
+`edit_issue_edges: usage: <message>` (or `edit_issue_edges: <token>: <message>` for `self-reference` and
+`qualified-reference-unsupported`) and never echo the rejected value verbatim beyond printable ASCII.
+*(Edit B2.)*
 
 ### 3.8 Audit event
 
@@ -549,6 +555,10 @@ and it costs one endpoint.
   mode: `<flag> is not supported with edge modes — an edge list is always complete and unfiltered`. A
   filtered edge list could be misread as a complete one. Today `--issue` silently ignores the list
   filters. The new modes refuse them instead.
+- **Every rule in this subsection, including the `^[1-9][0-9]*$` value check, runs before the mint**
+  (with the existing validation block, `:103-130`), so a usage error never mints (T-EQ8). This differs
+  deliberately from `--comments`, which validates its number after the mint. *(Architect round 2,
+  edit B3.)*
 - Exit codes follow the script's **existing contract**: 0 on success (possibly with empty output), and
   1 on any usage or read failure (`err`/`fail`). `query_issues.sh`'s contract is not changed.
 
@@ -577,7 +587,10 @@ in this repository:
 - **No PR filter.** `--list` drops `pull_request` records. An edge mode must never hide an edge.
   GitHub does not permit PR edges, so in practice there is nothing to drop.
 - `--parent-of` on a non-child prints **nothing** and exits 0, the same "empty is a valid answer" rule
-  as an empty `--list`.
+  as an empty `--list`. "Non-child" means `parent_issue_url` is absent or `null` **only** (TD-E3). Any
+  other non-string value, or an empty string, is undeterminable: exit 1, no stdout, never an empty
+  "no parent" answer. *(Edit B3.)* The `/parent` record is rendered through the same edge filter, so a
+  cross-repo parent is qualified (T-EQ3).
 
 ### 4.4 Pagination: complete, or fail
 
@@ -587,7 +600,8 @@ in this repository:
 - If 10 full pages are fetched without a short page, the mode prints **nothing** to stdout. It exits 1
   with `edge list for #<N> exceeds 1000 entries — refusing to print a truncated list`. A partial edge
   list is never printed (TD-E6, D41 item 1).
-- A failure on any page exits 1 with no stdout.
+- A failure on any page exits 1 with no stdout. A page body that is not a JSON array counts as a
+  failure. *(Edit B3.)*
 
 ### 4.5 `--issue` output: unchanged, byte for byte
 
@@ -746,7 +760,7 @@ number/id mix-up fails.
 | **T-EW16** *(resolution failures)* | R1 404: exit 2 `issue-not-found issue=#10`, **no R2 call**. R2 404: exit 2 `issue=#20`. R1 500: exit 1. R1 403 with no rate-limit header: exit 2 `read-rejected`. R1 403 with `retry-after`: exit 1. R1 with no response: exit 1. R1 body with no integer `id` (missing, or the string `"5"`): exit 1 `read-malformed`. A PR on either side: exit 2 `target-is-pull-request`. `.number` mismatch, or a foreign `repository_url`: exit 2 `issue-moved`. R3 404 after R1/R2 pass (blocked-by flags): exit 6 `edges-undeterminable http=404` (edit A1). Every case makes **zero writes**. |
 | **T-EW17** *(write rejected)* | POST 422 with message `"bad\u0007thing"`, state unchanged: exit 2 `write-rejected http=422 message=badthing`. The control character is stripped. The audit outcome is `write-rejected`. |
 | **T-EW18** *(lost response)* | POST 502, but the stub applies the mutation: V sees it, so **exit 0 `added`**. Same for 422 with the mutation already applied by a "concurrent" writer. |
-| **T-EW19** *(write failed / unverified)* | POST 502, not applied: exit 4 `write-failed http=502`. POST 403 with `retry-after`, not applied: exit 4. No response, not applied: exit 4 `http=none`. POST 201 but not applied (lag): exit 4 `unverified http=201`. POST 201, then V's GET 500: exit 4 `unverified verify-read-failed`. |
+| **T-EW19** *(write failed / unverified)* | POST 502, not applied: exit 4 `write-failed http=502`. POST 403 with `retry-after`, not applied: exit 4. No response, not applied: exit 4 `http=none`. POST 201 but not applied (lag): exit 4 `unverified http=201`. POST 201, then V's GET 500: exit 4 `unverified verify-read-failed`. POST 201, then V's GET 404, and (add-parent) V's `parent_issue_url` is the integer `5`: each exit 4 `unverified verify-read-failed` (edit B1). |
 | **T-EW20** *(race on add-parent)* | POST 422, and V shows parent #30: exit 6, `has-other-parent current=#30`. |
 | **T-EW21** *(static)* | The script text has no `--paginate`, `-f `, `-F `, `--field`, `--raw-field`, `--jq`, `gh issue`, `replace_parent` or `body=@`. Every `gh api` invocation line carries `--include`. |
 | **T-EW22** *(request budget)* | Parametrized over §3.9's rows: the count of `gh` calls equals the table, and the **sequence** equals the table. Pre-mint refusals show 0 `gh` calls and no `MINT`. |
@@ -762,10 +776,10 @@ bash `gh` stub is extended to serve `issues/<n>`, `issues/<n>/parent`, `…/sub_
 | ID | Asserts |
 |---|---|
 | **T-EQ1** | `--parent-of 1351` with a child fixture: exactly 2 calls (`issues/1351`, `issues/1351/parent`), and one line `#1349 milestone=… state=closed labels=… <title>`. |
-| **T-EQ2** | `--parent-of` on a record **without** `parent_issue_url`, and on one with `null`: exactly **1** call, empty stdout, exit 0. `/parent` is never called (TD-E2). |
+| **T-EQ2** | `--parent-of` on a record **without** `parent_issue_url`, and on one with `null`: exactly **1** call, empty stdout, exit 0. `/parent` is never called (TD-E2). With `parent_issue_url` = the integer `5` or `""`: 1 call, exit 1, empty stdout (edit B3). |
 | **T-EQ3** | `--parent-of` with a cross-repo parent: the line starts `other-owner/other-repo#7 milestone=`. |
 | **T-EQ4** | `--sub-issues-of 1358` gives three lines in fixture order (no sort). For each same-repo record, the line is **byte-identical** to the line `--list` prints for the same record (the test runs both modes on one fixture). No PR filtering: a record carrying `pull_request` is still printed. |
-| **T-EQ5** | Pagination: 100 + 3 records give 103 lines, with calls `page=1`, `page=2` and explicit `per_page=100`. Ten full pages give exit 1, **empty stdout**, and stderr containing `refusing to print a truncated list`. |
+| **T-EQ5** | Pagination: 100 + 3 records give 103 lines, with calls `page=1`, `page=2` and explicit `per_page=100`. Ten full pages give exit 1, **empty stdout**, and stderr containing `refusing to print a truncated list`. A page-2 body that is a JSON object, not an array: exit 1, empty stdout (edit B3). |
 | **T-EQ6** *(direction pin)* | `--blockers-of 10` requests `…/issues/10/dependencies/blocked_by?…`. `--dependents-of 10` requests `…/issues/10/dependencies/blocking?…`. |
 | **T-EQ7** | A cross-repo entry inside `--blockers-of` renders as `o/r#5 …`. A record missing `repository_url` renders as `unknown-repo#5 …`. |
 | **T-EQ8** *(usage)* | `--sub-issues-of 1,2` → exit 1. The same mode twice → exit 1 `given more than once`. Combined with `--list`, `--issue`, or another edge mode → exit 1 `exactly one of`. Combined with `--milestone`, `--milestone-less`, `--label`, `--state` or `--full` → exit 1 `not supported with edge modes`. None of these mints. |
@@ -1064,3 +1078,58 @@ detail-level corrections inside a slice nobody has built. No sign-off is affecte
    its own initiative. It blocks the start of coding on T3.3 or T3.7a, not this slice's merge.
 2. **The code PR is a protected surface** (`bootstrap/**`, `CLAUDE.md`), so it passes the CODEOWNERS
    human gate as usual.
+
+---
+
+## Architect review — round 2 (2026-10-01, independent re-review)
+
+**Verdict: APPROVED_WITH_EDITS.** The adopting cycle does not inherit round 1's status, so this is a
+fresh read of the committed text against ADR-1644 AD-C14, §5 (T3.3a row), §8 and Erratum 1, and against
+`bootstrap/query_issues.sh` and `bootstrap/edit_issue.sh` at `109985cb`.
+
+**Round-1 edits verified in the text, not just listed:** A1 (§3.4 R3, §3.5 `404`/`410` row, §3.7 exit 6,
+T-EW16), A2 (§3.4 first-match note above the V table), A3 (§4.3 case-insensitive comparison and the
+separate `EDGE_LINE_FILTER`), A4 (§6.1 forward note), A5 (§9 binding). OQ-1 to OQ-4 are consistent
+with §1 "Not touched", §6.2(4), §7's CLAUDE.md caution, and §9. OQ-3's original "T3.3 entry criterion"
+recommendation is superseded by the A5 ruling ("T3.3 or T3.7a, whichever enters coding first").
+
+**Edits made (round 2):**
+- **B1, V-failure classification** (§3.4 V table, T-EW19). The first row named only transient,
+  malformed and page-bound failures. A V read returning `404`/`rejected`, or a V record whose
+  `parent_issue_url` is undeterminable, matched no row cleanly and could have fallen into the
+  "state does not hold" rows or, for `--remove-parent`, been misread as "absent → removed". Now every
+  non-`ok` V read and every undeterminable V parent is exit 4 `verify-read-failed`. This preserves the
+  round-1 soundness property: exit 0 only on an observed state.
+- **B2, exit-2 helper and pre-mint stderr form** (§3.3, §3.7). "`err` as in the siblings" exits 1, which
+  contradicts the exit-2 usage contract. The script must use a `refuse` helper (the
+  `escalate_to_human.sh` precedent). Pre-mint usage lines get a defined form, because `issue=#N` cannot
+  be populated for an invalid value.
+- **B3, `query_issues.sh` edge-mode validation timing and undeterminable reads** (§4.2, §4.3, §4.4,
+  T-EQ2, T-EQ5). T-EQ8 asserts "none of these mints", but the TD did not say the value check runs
+  before the mint, and the closest existing precedent (`--comments`) validates after it. `--parent-of`
+  on a non-string `parent_issue_url` would have printed an empty "no parent" answer. That is a silent
+  wrong answer, so it is now exit 1. Non-array pages are a failure.
+
+**Checked and sound without change:**
+- **Exit codes** 0/1/2/4/6 are each reachable, mutually exclusive, and mapped to one caller action
+  (§3.7). `query_issues.sh` keeps 0/1.
+- **Read-back contract.** V always runs after W. W's status selects only the token. B1 closes the one
+  unmapped V outcome.
+- **`--issue` byte-identity.** `ISSUE_LINE_FILTER` (`query_issues.sh:174`) and `ISSUE_FULL_FILTER`
+  (`:175`) stay textually frozen (A3). T-EQ10 pins the line against a record that carries the new
+  fields, and the existing `test_query_issues.py` suite runs unchanged.
+- **Test plan.** Every AD-C14 clause traces to at least one test (§8.4), and the number≠id fixtures make
+  a number/id mix-up fail. T-EQ11 is the enforcement behind the OQ-1 ruling, and it must not be
+  weakened.
+- **File list.** 8 files, within ≤15. The protected surfaces are correctly identified, and the PR is
+  HUMAN_REQUIRED via CODEOWNERS.
+- **V-LIVE scope.** It is correctly a gate on T3.3/T3.7a entry and not on T3.3a's merge (§9, header).
+  **Durability note (non-blocking):** the binding lives only in this TD. Whoever opens the T3.3 or
+  T3.7a TD must cite §9 as an entry criterion. The orchestrator should carry it into those slices'
+  briefs, because ADR-1644 §5 does not list it.
+
+**Startup-gap analysis.** B1 to B3 are detail-level corrections in an unbuilt slice. No sign-off is
+affected. No `startup-artifact-gap` is warranted.
+
+**Required changes from `technical-design`: none.** `coder` implements the TD as edited. The human
+items from round 1 (V-LIVE authorization; CODEOWNERS gate) are unchanged.
