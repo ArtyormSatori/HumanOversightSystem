@@ -1,0 +1,1 @@
+{"actor":"hos-overseer-hos[bot]","composite":0.4987,"disposition":"HUMAN_REQUIRED","event":"pr-review","head_sha":"3569672382f5a985e66b4abcfb76e935a8ba67e2","pr":1933,"reason":"Security-relevant change (posture V1-V14 extraction) without human sign-off on head; #1853 codex-header ruling requested","review_id":5394859626,"tier":"HIGH","tier_floor":"HIGH"}
