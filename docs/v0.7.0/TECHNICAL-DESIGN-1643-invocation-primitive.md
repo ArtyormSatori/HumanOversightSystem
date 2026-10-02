@@ -38,7 +38,15 @@ below is designed to be implementable without further design questions.
 > a list of four — the exact set TD-D24 keys on — and is corrected to "four" under this amendment rather
 > than a new one.
 
-**Date:** 2026-09-14 (original), amended 2026-09-16 (Amendment A)
+> **AMENDED 2026-10-02 — Amendment C (W5 schema-parametric loader, ADR-1644 SEAM-1). Binding on W5 once
+> the architect approves; W5 is unbuilt.** ADR-1644 SEAM-1 requires W5's loader to be one loader and one
+> ownership model for every registry kind. Each document says which kind it is through its `schema:`
+> field. §7 assumed a dimensions-only loader. Amendment C (end of document) adds the dispatch seam and
+> the extension point T3.1 uses (§C.2.4, §C.2.9). It also corrects seven §7 claims that the current tree
+> contradicts (TD-VF-15…TD-VF-21) and re-confirms two that still hold (TD-VF-13, TD-VF-14). §7.3, §7.4,
+> §7.7 and §7.9 carry pointer notes.
+
+**Date:** 2026-09-14 (original), amended 2026-09-16 (Amendment A), 2026-09-18 (Amendment B), 2026-10-02 (Amendment C)
 **Iteration:** 1 of 5
 **Author:** technical-design
 **Binding inputs:** `docs/v0.7.0/ADR-1643-deterministic-agent-invocation.md` (AD-1…AD-16 BINDING);
@@ -1849,6 +1857,11 @@ moves to `pack-hos-dev.yaml` with no schema change.
 
 ### 7.3 Loader API — `scripts/automation/lib/dimension_registry.py`
 
+> **Amended by Amendment C (2026-10-02, ADR-1644 SEAM-1).** The loader is schema-parametric: `load()` below
+> keeps its signature but becomes the dimensions-kind wrapper over `load_registry(repo_root, schema, …)`;
+> `packs=None` reads `contract/resolved-packs.txt`, **not** `config.sh`'s `PACK=` (TD-VF-16). See §C.2.7
+> for the full amended API. Do not implement this section without Amendment C.
+
 Pure module: **no `argparse`, no `__main__`, no `sys.argv` read, no network, no subprocess.**
 AD-9 binds this path; the CLI is a separate L2 module (**TD-D18**), matching the
 `merge_authority.py` (L1) / `merge_authority_cli.py` (L2) split the repo already uses.
@@ -1897,6 +1910,11 @@ to be on disk — that inference is precisely what rule L20 exists to catch.
 
 AD-9: *"The loader fails closed, always."* Compare AF-5: a permissive loader would reproduce
 `check_register_completeness`'s "nothing required, therefore nothing incomplete" exactly.
+
+> **Amended by Amendment C (2026-10-02, ADR-1644 SEAM-1).** Each rule below is now classified kind-generic
+> (enforced by the engine for every registered schema) or dimension-specific (enforced by the
+> dimensions-kind handler). L3 is split, L12 is re-pointed at V1–V14 through a shared L1 module, and rules
+> L22–L28 are added. See §C.2.6 for the table and the check order.
 
 | # | Condition | `RegistryError.code` |
 |---|---|---|
@@ -1982,6 +2000,11 @@ decision, not an omission.
 
 Verified against `hos_install.sh`'s actual implementation, not by analogy (TD-VF-5).
 
+> **Amended by Amendment C (2026-10-02).** Items 1, 2 and 4 are revised in §C.2.11: the eight prompt files
+> also ship, pack-data copying is table-driven per registry kind and runs once outside the per-agent loop,
+> the installer writes `contract/resolved-packs.txt`, and manifest rows for generated files are emitted
+> explicitly.
+
 1. **`core.yaml`, `project.yaml.template`, and the four posture files** are added to
    `scripts/framework/framework_consumer_files.txt`. That single edit gives overwrite-on-upgrade (the
    copy loop at `:1906-1917` uses `cp_framework_file`) **and** `.hos-manifest` tracking (`:2206-2225`
@@ -2051,6 +2074,10 @@ correction is recorded here rather than silently applied.
 ### 7.9 `run_post_change_sweep.sh` reduced to `--explain` (AD-11)
 
 **Rewritten, not deleted** — its human-facing value is real (AD-11), but it is no longer a source of truth.
+
+> **Amended by Amendment C (2026-10-02).** The usage line, the exit-1 meaning, and the interpreter are
+> superseded by §C.2.10 (TD-D29/TD-D30). The script keeps today's input grammar and drops
+> `--framework-only`.
 
 ```
 Usage: run_post_change_sweep.sh [--base <ref>] [--json] [--framework-only]
@@ -2678,3 +2705,670 @@ non-spending paths write a spend record* is a detail AD-8 left to this document,
 was read, not edited, and the coder implements TD-D24. No sign-off register entry (`technical-design`
 writes none). No issue filed: §13 **recommends** a `startup-artifact-gap` issue and the orchestrating
 session files it.
+
+---
+
+## Amendment C (2026-10-02) — W5's loader is schema-parametric (ADR-1644 SEAM-1), and seven §7 claims corrected against the tree
+
+**Status:** DRAFT. **Binding on W5 once the architect approves.** W5 is unbuilt, so no code has been
+written against the §7 text this amendment supersedes. The one piece of *built* code it touches is W1's
+posture validator, and that change preserves its behaviour (§C.2.8). Where this amendment and §7 disagree,
+**this amendment governs**. §7 sections it does not name stand as written.
+
+### C.1 Rationale and scope
+
+**Why.** ADR-1644 §4 **SEAM-1** (`ADR-1644-stage-per-cycle.md:867-871`) binds W5's `technical-design` to
+build the loader *"schema-parametric: one loader and one ownership model, with each registry document
+declaring which schema it is (dimensions or stage graph) … It is not a second loader."* AD-C1 (`:206-242`)
+puts the stage graph in `contract/stages/` with the same `core.yaml` / `pack-<name>.yaml` / `project.yaml`
+layout, and ends with *"One loader, not two. See §4 SEAM-1"* (`:242`). ADR-1643 **AD-12** (`:574-606`)
+already said the same from the other side: the worker's graph shares this registry's *"format, ownership
+model, and loader, and nothing else."* §7 as written is a dimensions-only loader. T3.1 (`ADR-1644:899`)
+depends on W5, so building §7 as written would force T3.1 either to fork the loader (forbidden) or to
+rebuild W5 after it lands.
+
+**Scope.** This is a delta and not a rewrite of §7. It adds:
+1. A **dispatch seam**: one engine and a static per-schema table (§C.2.4).
+2. A **classification** of every §7.4 rule as kind-generic or dimension-specific, plus seven new rules and
+   a fixed check order (§C.2.6).
+3. The **extension point** T3.1 uses (§C.2.9).
+4. **Corrections** to seven §7 claims that the tree contradicts (§C.2.2, TD-VF-15…TD-VF-21), each with
+   a file:line citation, re-verified this session against the `main` checkout at `035c57637`.
+
+It designs **nothing** of the stage graph itself. Stage vocabulary, transitions, caps and the fits-one-cycle
+check belong to T3.1's own technical design.
+
+**Numbering.** Amendment C uses TD-VF-13…TD-VF-21 and TD-D25…TD-D32. No earlier section of this document
+uses these numbers. (The `TD-VF-15…17` in `TECHNICAL-DESIGN-1538-…` belong to that document.)
+
+### C.2 The amended W5 contract
+
+#### C.2.1 What changes in §7, and what does not
+
+| §7 section | Disposition under Amendment C |
+|---|---|
+| §7.1 File layout | **Stands**, with one added row: `contract/resolved-packs.txt` is generated by the installer (§C.2.5) |
+| §7.2 Schema (`core.yaml`, packs, project) | **Stands.** `schema: hos.dimension-registry` is now the dispatch key, not merely a check |
+| §7.3 Loader API | **Superseded by §C.2.7.** `load()` keeps its signature. The `packs=None` sentence is replaced (TD-VF-16) |
+| §7.4 Failure rules L1–L21 | **Classified and extended by §C.2.6.** L3 is split, L5/L12 are amended, L22–L28 are added, and the order is fixed |
+| §7.5 `resolve_for_diff` | **Stands**, and is dimension-specific |
+| §7.6, §7.8 | **Stand** |
+| §7.7 Installer items 1, 2, 4 | **Superseded by §C.2.11.** Items 3 and 5 stand |
+| §7.9 `run_post_change_sweep.sh` | The usage line, the exit codes and the interpreter are **superseded by §C.2.10**. The other bullets stand |
+| §7.10 CLI | **Amended by §C.2.7**: `resolve` gains `--schema`, and the pack set defaults to `contract/resolved-packs.txt` |
+| §9.5 Tests | **Extended by §C.2.12**, and T5.32 is re-pointed |
+| §10 File budget, W5 row | Adds `scripts/automation/lib/posture.py` (new), `contract/resolved-packs.txt` (new, HOS's own), and `scripts/automation/agent_invoke_cli.py` (modified, §C.2.8) |
+
+#### C.2.2 Verification findings — TD-VF-13…TD-VF-21
+
+All citations are to the working tree at `035c57637`. TD-VF-13 and TD-VF-14 **re-confirm** earlier
+claims that §7 still depends on. TD-VF-15…TD-VF-21 are **contradictions**: places where §7, as written,
+would produce a defect against the tree as it actually is.
+
+**TD-VF-13 — TD-VF-6 still holds: `scripts/automation/**` is not shipped to consumers.**
+`scripts/framework/framework_consumer_files.txt` (85 lines) has no `scripts/automation` entry and no
+`contract/` entry. `bootstrap/hos_install.sh` never mentions `automation`, `invoke_agent` or
+`contract/dimensions`. `enumerate_framework_files` recurses only `scripts/oversight`
+(`hos_install.sh:2207-2208`). CONFIRMED.
+
+**TD-VF-14 — `contract/**` is protected surface, and the W1 posture files exist but are not shipped.**
+`contract/**` is the **second entry** of `scripts/framework/protected_surfaces.txt` (file line 17). §7.4's
+"line 2" counts entries, not file lines. The four posture files exist under
+`contract/dimensions/postures/`, and none of them is in the ship-set. That matches §7.7 item 1, which
+adds them in W5. CONFIRMED, with the citation clarified.
+
+**TD-VF-15 — CONTRADICTS §7.7 item 2: no standalone "pack phase" exists. The only per-pack loop is nested
+inside the per-agent loop, in the write-nothing Phase A.** The pack loop is
+`for _pk in … _resolved_packs` at `hos_install.sh:1499`. It sits inside `for agent in
+"${_consumer_agents[@]}"` at `:1461`, and both are part of Phase A, which is *"collecting each file's plan
+WITHOUT writing"* (`:1339-1345`). A Phase-A abort exits 4 having written nothing (`:1623-1634`). A coder
+who follows "add, inside the pack phase" lands in that loop. The copy then runs once per agent instead
+of once per install, and data files get written before the drift gate decides, which breaks the installer's
+decide-all-then-act invariant. **Corrected by §C.2.11 item 2 (TD-D31):** the copy runs once, outside the
+agent loop, after Phase B. §7.7's citation `:1489-1519` is now `:1461` (outer loop) and `:1488-1519`
+(inner).
+
+**TD-VF-16 — CONTRADICTS §7.3: `config.sh`'s `PACK=` is not the resolved pack set.** `PACK=` records the
+operator-selected **leaf** only, as a **single value** (`:1176-1178`: *"reads config.sh PACK= as a SINGLE
+value … multi-value form is a noted-not-built seam"*). R5 writes it only when exactly one `--pack` was
+passed (`:1322`, `-eq 1`), so a two-`--pack` install records nothing at all. The dependency closure *"is
+re-derived every run, never persisted to config.sh"* (`:1224-1225`). Re-deriving the closure needs
+`pack.toml` `requires` parsing (`_pack_requires`, `:1117`) and consumer-local pack precedence
+(`_resolve_pack_dir`, `:1101-1111`), and both are bash-only logic. So a loader that reads `PACK=astro`
+sees `{astro}`, while the installer copied files for `{node, astro}` (`:1215-1225`'s own example).
+`pack-node.yaml` then trips L20 (`stale_pack_file`) on every load, and an honest install fails closed
+for good. **Corrected by §C.2.5 (TD-D27) and §C.2.7:** the installer persists the closure to
+`contract/resolved-packs.txt`, and `packs=None` reads that file.
+
+**TD-VF-17 — CONTRADICTS §7.7 item 2, third bullet: there are no "manifest rows" to append a copied pack
+file to.** Non-agent `WHOLE` rows are produced by `enumerate_framework_files "$HOS_SOURCE"`. It `cd`s into
+the **HOS source** and emits only paths that exist **there** (`:2205-2225`, `[[ -f "$_fc" ]]`), with a
+sha256 of the source bytes. `contract/dimensions/pack-<n>.yaml` has no source-tree counterpart at that
+path, because its source is `packs/<n>/dimensions.yaml`, so enumeration never emits it. The only row
+collection the installer accumulates is the Phase-B `manifest-spec.json`, which is agent-region rows
+only (`:1638-1679`). **Corrected by §C.2.11 item 4 (TD-D32):** rows for generated or renamed files are
+emitted explicitly.
+
+**TD-VF-18 — CONTRADICTS §7.7 item 1: the shipped set omits the eight prompt files that rule L21 requires,
+and the ship-list loop cannot take a directory or a glob.** §7.2's judgment bindings reference
+`contract/dimensions/prompts/{code-review,security,privacy,reliability,ops,ui,a11y,infra}.md`, and §10
+budgets all eight. L21 makes a missing `prompt_template` a load error. §7.7 item 1 adds only `core.yaml`,
+the template and the postures, so a fresh consumer install fails L21 on its first load. Each line of
+`framework_consumer_files.txt` is treated as one literal file (`:1906-1916`). A directory or glob line
+fails `[[ -f … ]]` at `:1910` and is skipped with a warning, not an error. **Corrected by §C.2.11
+item 1:** the eight prompts are listed individually.
+
+**TD-VF-19 — CONTRADICTS §7.9: the usage line drops today's grammar while claiming to keep it, and exit
+`1` already has a different meaning.** Today the grammar is a positional ref matching `HEAD*`, or
+`--staged`, or explicit file arguments, or `--framework-only` (`run_post_change_sweep.sh:12-17`,
+`:30-38`). There is no `--base` and no `--json`. Today's changed-file computation includes the empty-diff
+fallback to `HEAD~1` (`:44-53`). §7.9 says *"computes the changed-file list exactly as it does today"*
+under a usage line that can express none of those forms. Exit `1` today means *"no changed files
+detected"* (`:19-22`, `:55-58`), and §7.9 redefines it as "loader failure" without saying so.
+`--framework-only` filters on `categorize()`'s `framework` domain (`:70-72`), and §7.9 deletes
+`categorize()`, so the flag would have nothing to filter. A search of `bin/`, `scripts/`, `tests/` and
+`.claude/agents/post-change-sweep.md` found **no programmatic caller** of the script. Only docs mention
+it, and `framework-setup-validator.md:70` checks that it exists. So redefining exit `1` breaks no caller.
+**Corrected by §C.2.10 (TD-D29).**
+
+**TD-VF-20 — CONTRADICTS §7.4 L12: posture validation is V1–V14, and it lives in an L2 module the L1
+loader may not import.** L12 cites *"§3.6's V4–V11"*. §3.6 now has V1–V14 (Amendment 5 added
+V12–V14), and the built validator implements all fourteen (`agent_invoke_cli.py:302-413`). The block
+header at `:298` still reads "V1-V11", and the docstring at `:305` reads "V2-V11". Both are stale comments.
+The validator is `agent_invoke_cli.load_posture`, an **L2** function. It raises L2-private
+`_UsageError`/`_PreflightFailure`, and the module imports `argparse` (`:38`). §2's layer map has L1
+imported by L2, never the reverse, and §7.3 binds the loader to "no argparse". So L12 has no correct
+implementation under §7 as written. It could duplicate the rules, which leaves a second copy of a security
+control to drift. Or it could import L2, which breaks the layering. **Corrected by §C.2.8 (TD-D26):** the
+rules move to a shared L1 module.
+
+**TD-VF-21 — CONTRADICTS §7.9/§7.10: the rewritten sweep is shipped to consumers, but the CLI it calls is
+not, and §7.10 invokes it with a bare `python3`.** `run_post_change_sweep.sh` is in the ship-set
+(`framework_consumer_files.txt:59`). `dimension_registry_cli.py` and its L1 loader are not (TD-VF-13).
+On every consumer install, the §7.9 script would therefore call a file that does not exist. ESC-E
+recorded the ship-set gap for the L2 *modules*, but it did not note that W5 rewrites a *shipped* script
+to depend on them. Separately, §7.10's `python3 scripts/automation/dimension_registry_cli.py …`
+reproduces the exact defect Amendment A fixed. PyYAML is only in `scripts/oversight/requirements.txt`
+(line 17) and the venv, and the fix was `invoke_agent.sh`'s three-rung ladder (`bootstrap/invoke_agent.sh`,
+the `INVOKE_AGENT_PYTHON` → `scripts/oversight/.venv/bin/python` → `python3` block). **Corrected by §C.2.10
+(TD-D30)**: interpreter ladder plus a fail-closed check that the CLI exists. **The ship-set decision is
+escalated (§C.4 Q1)**, not taken here.
+
+#### C.2.3 Module layout (TD-D25)
+
+```
+L1  scripts/automation/lib/dimension_registry.py   NEW (W5) — THE loader engine (kind-agnostic) + the
+                                                     dimensions-kind handler + load() wrapper.
+                                                     AD-9's bound path; kept.
+    scripts/automation/lib/posture.py              NEW (W5) — V1–V14, moved out of L2 (§C.2.8)
+    scripts/automation/lib/stage_registry.py       NOT W5 — T3.1's stage-graph handler (§C.2.9)
+L2  scripts/automation/dimension_registry_cli.py   NEW (W5) — unchanged role (§7.10), plus --schema
+    scripts/automation/agent_invoke_cli.py         MODIFIED (W5) — load_posture becomes an adapter
+```
+
+**TD-D25 — the engine stays at AD-9's bound path, and kind handlers are separate modules.** AD-9 names
+`scripts/automation/lib/dimension_registry.py` as *the* loader, and SEAM-1 says there is one. Putting the
+engine anywhere else would move AD-9's bound path, and that is an architecture decision, not mine. The
+module name now undersells what it holds. That is a cosmetic cost, and I record it rather than fix it by
+fiat (§C.4 Q3). The dimensions handler shares the module with the engine because it is the
+one kind W5 ships. Every other kind is its own module, so T3.1 never edits W5's handler.
+
+#### C.2.4 The dispatch seam
+
+The engine holds **one static, module-level table**, `KINDS: Mapping[str, KindSpec]`, keyed by the
+`schema:` string. It is a literal in source. There is **no** runtime `register_kind()` call, because
+import-order-dependent registration would make "which kinds exist" depend on which modules some caller
+happened to import first. Adding a kind means adding one row in a reviewed diff.
+
+```python
+DIMENSIONS_SCHEMA = "hos.dimension-registry"
+
+@dataclass(frozen=True)
+class KindSpec:
+    schema: str                                   # == the KINDS key
+    schema_version: int                           # the one accepted version (L3b)
+    directory: str                                # repo-relative, e.g. "contract/dimensions"
+    pack_source: str                              # filename under packs/<n>/, e.g. "dimensions.yaml"
+    handler_module: str                           # dotted import path of the handler (§C.2.9)
+    top_level_keys: Mapping[str, frozenset[str]]  # per owner ∈ {core, pack, project}: the CLOSED grammar (L23)
+    core_only_keys: frozenset[str]                # keys only core.yaml may carry (L5)
+    project_only_keys: frozenset[str]             # keys only project.yaml may carry (L18)
+
+KINDS: Mapping[str, KindSpec] = MappingProxyType({
+    DIMENSIONS_SCHEMA: KindSpec(
+        schema=DIMENSIONS_SCHEMA, schema_version=1,
+        directory="contract/dimensions", pack_source="dimensions.yaml",
+        handler_module="scripts.automation.lib.dimension_registry",
+        top_level_keys={
+            "core":    frozenset({"schema", "schema_version", "owner", "entries", "bindings"}),
+            "pack":    frozenset({"schema", "schema_version", "owner", "pack", "bindings"}),
+            "project": frozenset({"schema", "schema_version", "owner", "bindings", "suppress"}),
+        },
+        core_only_keys=frozenset({"entries"}),
+        project_only_keys=frozenset({"suppress"}),
+    ),
+    # T3.1 adds exactly one row here (§C.2.9). Nothing else in the engine changes.
+})
+```
+
+**The seam is exactly this:** the engine does everything that is the same for every kind. That covers
+locating the files, the pack set, the generic rules in §C.2.6, YAML parsing, and building the ordered
+layer tuple. It then makes **one call**, `handler.resolve(docs, ctx)`, which returns the kind's resolved
+object. The handler never touches the filesystem layout, the pack set or YAML. It receives parsed
+documents and a context, and nothing else.
+
+#### C.2.5 `contract/resolved-packs.txt` (TD-D27)
+
+**TD-D27 — the installer persists the resolved pack closure as data, and the loader reads only that.**
+TD-VF-16 shows that `PACK=` cannot serve. Two alternatives were rejected:
+- **(a) Re-derive the closure in Python.** This duplicates `_pack_requires` and `_resolve_pack_dir`'s
+  consumer-local precedence, which gives a second implementation of pack resolution that can drift.
+  D41 forbids that.
+- **(b) Infer the set from which `pack-*.yaml` files exist.** This is exactly what L20 exists to forbid
+  (§7.3).
+
+**Format (binding):**
+- UTF-8, LF line endings.
+- Lines beginning with `#` are comments. Blank lines are ignored.
+- Every other line is **exactly one** pack slug matching `^[a-z0-9][a-z0-9-]*$` (the installer's own R2b
+  grammar, `hos_install.sh:1277-1282`), with no surrounding whitespace.
+- Lines are in the installer's **dependency-closure order**, deps first (`_resolved_packs` after R2c). That
+  is also the PACK merge order.
+- No slug appears twice.
+- **Zero slug lines is valid and means "no packs".** `--no-pack` and HOS's own repo both produce this.
+- The installer writes this header, verbatim:
+  `# Generated by bootstrap/hos_install.sh — the resolved pack closure, deps first. Do not edit; re-run the installer.`
+
+**Ownership.** The file is **installer-owned**. Every install overwrites it, including `--no-pack`
+installs and installs where the pack set is unchanged. It is **never** listed in
+`framework_consumer_files.txt`, because HOS's own copy must never overwrite a consumer's. HOS's own repo
+commits its own zero-pack file, since HOS is not installed into itself (`scripts/framework/config.sh` has
+no `PACK=`). It sits under `contract/**`, so a consumer's pack change surfaces as a CODEOWNERS-gated edit,
+just as the `pack-*.yaml` changes that accompany it already do.
+
+**Absent ⟹ load error (L24), not "no packs".** An absent file cannot be told apart from an install that
+predates W5, or a hand-copied tree. Reading absence as "no packs" would make every present
+`pack-*.yaml` look stale (L20). Worse, it would turn a missing input into a silent default. Fail closed.
+
+#### C.2.6 Rule classification, amended rules, new rules L22–L28, and the check order
+
+**Kind-generic** rules are enforced by the engine for **every** schema in `KINDS`. They are parameterised
+only by `KindSpec` fields. **Dimension-specific** rules are enforced by the dimensions handler and do not
+apply to other kinds. A future kind declares its own specific rules in its own technical design.
+
+| # | Class | Condition (amended text in **bold**) | `RegistryError.code` |
+|---|---|---|---|
+| L1 | generic | `<directory>/core.yaml` absent or unreadable | `core_missing` |
+| L2 | generic | `import yaml` fails | `yaml_unavailable` |
+| **L3a** | generic | **Any loaded file is not a YAML mapping, or its `schema` is absent, or `schema` ≠ the schema being loaded** (catches a stage file dropped into `contract/dimensions/`, and the reverse) | `bad_schema` |
+| **L3b** | generic | **`schema_version` ≠ `KindSpec.schema_version`** | `bad_schema_version` |
+| L4 | generic | `owner` absent or not matching the filename (unchanged) | `owner_mismatch` |
+| **L5** | generic | **A key in `KindSpec.core_only_keys` appears in any file other than `core.yaml`.** For dimensions this is exactly §7.4's `entries:` rule | **`core_only_key`** (renamed from `entries_outside_core`; the message names the key) |
+| L6 | dim-specific | Duplicate entry id or binding id | `duplicate_id` |
+| L7 | dim-specific | Binding id namespace ≠ owner | `binding_namespace` |
+| L8 | dim-specific | Binding references an unknown entry | `unknown_entry` |
+| L9 | dim-specific | Binding `kind` ≠ entry `kind` | `kind_mismatch` |
+| L10 | dim-specific | Judgment binding's agent file absent | `agent_missing` |
+| L11 | dim-specific | Deterministic binding's tool absent or not executable | `tool_missing` |
+| **L12** | dim-specific | **`kind: judgment` and `posture` absent, or `posture.load_posture(repo_root, posture)` raises `PostureError` for any of V1–V14** (§C.2.8). The message carries the failing rule id, e.g. `V13`. V1 (unknown posture name) is an ordinary L12 failure here, since the loader has no usage-error class | **`posture_invalid`** (renamed from `posture_missing`, because it now covers invalid as well as absent) |
+| L13 | dim-specific | Bad `timeout_seconds` | `bad_timeout` |
+| L14 | dim-specific | Bad `predicate` | `bad_predicate` |
+| L15 | dim-specific | `suppress` names an unknown binding | `suppress_unknown` |
+| L16 | dim-specific | `suppress` names a `core:` binding | `suppress_core` |
+| L17 | dim-specific | `suppress` with an empty reason | `suppress_no_reason` |
+| **L18** | generic | **A key in `KindSpec.project_only_keys` appears in any file other than `project.yaml`.** For dimensions this is exactly §7.4's `suppress:` rule | `suppress_outside_project` → **`project_only_key`** (renamed; the message names the key) |
+| L19 | dim-specific | Entry with zero unsuppressed bindings | `entry_unbound` |
+| L20 | generic | A `pack-<n>.yaml` in `<directory>` whose `<n>` is not in the resolved pack set, **which now comes from §C.2.5** | `stale_pack_file` |
+| L21 | dim-specific | Judgment binding's `prompt_template` absent or missing | `prompt_missing` |
+| **L22** | generic | **The `schema` argument passed to `load_registry` is not a key of `KINDS`** | `unknown_kind` |
+| **L23** | generic | **A top-level key outside `KindSpec.top_level_keys[owner]`** (a closed grammar, so a typo such as `binding:` is never ignored silently) | `unknown_key` |
+| **L24** | generic | **`packs=None` and `contract/resolved-packs.txt` is absent, unreadable, or violates §C.2.5's format (bad slug, duplicate slug, or whitespace). An explicit `packs` sequence must meet the same slug and no-duplicate rules** | `bad_pack_set` |
+| **L25** | generic | **A regular, non-dot file directly in `<directory>` whose name is not `core.yaml`, `project.yaml`, `project.yaml.template`, or `pack-<slug>.yaml`.** Subdirectories (`postures/`, `prompts/`) are not examined. This catches a `project.yml` or `pack-Django.yaml` whose content would otherwise be silently unloaded | `unexpected_file` |
+| **L26** | generic | **The `KindSpec.handler_module` fails to import, lacks `resolve`/`to_json`, or `resolve` raises anything other than `RegistryError`.** The original exception's type and message are carried in the error message. A broken handler is never a skip | `kind_handler_failed` |
+| **L27** | dim-specific | **A `tool`, `prompt_template` or `agent`-derived path is absolute, or contains a `..` segment.** This is the V14 code-reviewer finding applied to the registry: `Path(root) / "/abs"` discards `root` and validates against the host filesystem | `path_escape` |
+| **L28** | dim-specific | **An entry, binding, predicate or suppress item carries a key outside its grammar** (§7.2's shapes are closed). This is the item-level twin of L23 | `unknown_key` |
+
+**Not an error (unchanged from §7.4, restated per kind):** a pack in the resolved set with no
+`pack-<n>.yaml`, and an absent `project.yaml`. The same holds for every kind.
+
+**TD-D28 — check order is part of the contract. The first failure wins, and exactly one `RegistryError` is
+raised.** Order:
+
+1. **Engine, before any file is parsed:** L22 → L26 (the handler imports and has the required attributes)
+   → L2 → L24 → L1 → L25 → L20.
+2. **Engine, per file, in merge order core → pack-\* (closure order) → project:** L3a → L3b → L4 → L5 →
+   L18 → L23. L5 and L18 precede L23 deliberately. Otherwise an `entries:` in `project.yaml` would
+   report as the vaguer `unknown_key`.
+3. **Handler (dimensions):** L28 → L6 → L7 → L8 → L9 → L13 → L14 → L27 → L10 → L11 → L12 → L21 → L15 →
+   L16 → L17 → L19. Shape comes first, then identity and reference, then filesystem existence (L27
+   guards the paths before L10/L11/L21 touch them), then suppression, and last the whole-registry
+   property L19, which is meaningful only once everything else holds.
+4. **Engine, around step 3:** any non-`RegistryError` raised by the handler becomes L26.
+
+Why fix the order? A fixture with two defects must produce the same code on every run and every machine.
+Without a fixed order, the tests in §9.5 could pass while asserting the "wrong" one of two true
+statements.
+
+#### C.2.7 The amended loader API (supersedes §7.3's code block and its `packs=None` sentence)
+
+§7.3's dataclasses `Entry`, `Predicate`, `Binding`, `PlanItem` and `RegistryError` are **unchanged**,
+and so are its purity constraints: no `argparse`, no `__main__`, no `sys.argv`, no network, no
+subprocess. **Added:** the engine never reads `os.environ`. Runtime values reach a handler only
+through `runtime=` (§C.2.9).
+
+```python
+# ── engine (kind-generic) ───────────────────────────────────────────────────
+@dataclass(frozen=True)
+class LayerDoc:
+    path: str                     # repo-relative, e.g. "contract/dimensions/pack-django.yaml"
+    owner: str                    # "core" | "pack" | "project"
+    pack: str | None              # the slug when owner == "pack"
+    data: Mapping[str, object]    # the parsed mapping, already through L3a-L23
+
+@dataclass(frozen=True)
+class LoadContext:
+    repo_root: Path               # absolute, resolved
+    kind: KindSpec
+    packs: tuple[str, ...]        # the resolved set, closure order
+    runtime: Mapping[str, object] # caller-supplied; empty mapping if None was passed
+
+def load_registry(repo_root: str | Path, schema: str, *,
+                  packs: Sequence[str] | None = None,
+                  runtime: Mapping[str, object] | None = None) -> object: ...
+    # Runs §C.2.6's order. Returns whatever KINDS[schema]'s handler.resolve returns.
+    # packs=None  -> read contract/resolved-packs.txt (L24 on absent/malformed).
+    # packs=[...] -> use verbatim, after L24's slug/duplicate check. [] means "no packs".
+    # NEVER reads scripts/framework/config.sh's PACK= (TD-VF-16).
+
+def read_resolved_packs(repo_root: str | Path) -> tuple[str, ...]: ...   # §C.2.5's parser; raises L24
+def registered_schemas() -> tuple[str, ...]: ...                         # sorted(KINDS); used by T5.44 and the CLI
+def registry_to_json(schema: str, resolved: object) -> dict: ...         # dispatches to the handler's to_json
+
+# ── dimensions kind (wrapper + handler, same module per TD-D25) ─────────────
+@dataclass(frozen=True)
+class ResolvedRegistry:
+    schema: str                              # ADDED — always DIMENSIONS_SCHEMA
+    packs: tuple[str, ...]                   # ADDED — the pack set it was resolved against
+    entries: Mapping[str, Entry]
+    bindings: Mapping[str, Binding]          # suppressed bindings are ABSENT
+    suppressions: Mapping[str, str]
+    source_files: tuple[str, ...]
+    digest: str                              # sha256 over to_json()'s canonical form, which now covers schema + packs
+
+def load(repo_root: str | Path, *, packs: Sequence[str] | None = None) -> ResolvedRegistry:
+    """SIGNATURE UNCHANGED from §7.3. Exactly load_registry(repo_root, DIMENSIONS_SCHEMA, packs=packs)."""
+def resolve(docs: tuple[LayerDoc, ...], ctx: LoadContext) -> ResolvedRegistry: ...   # the handler; dim-specific rules
+def resolve_for_diff(reg: ResolvedRegistry, changed_files: Sequence[str]) -> list[PlanItem]: ...  # §7.5, unchanged
+def to_json(reg: ResolvedRegistry) -> dict: ...                                      # unchanged role
+```
+
+**CLI delta (§7.10).** `resolve [--schema <s>] [--pack <n> ...]`: `--schema` defaults to
+`hos.dimension-registry`. An unknown value is **exit 1** with code `unknown_kind`, not exit 2, because the
+value is checked against data and not against the parser. With no `--pack`, the pack set comes from
+`contract/resolved-packs.txt`. `plan` is dimension-only and does not take `--schema`. The exit vocabulary
+and the stderr line form are unchanged. **The CLI must convert L2 (`yaml_unavailable`) into exit 1 and
+its standard stderr line, never a traceback.** This is the registry CLI's equivalent of TD-D23's P0.
+
+#### C.2.8 Shared posture validation (TD-D26), and how L12 now reaches V1–V14
+
+**TD-D26 — V1–V14 move to `scripts/automation/lib/posture.py`, an L1 module. W1's L2 keeps its exact
+behaviour through an adapter.** TD-VF-20 shows that the loader can neither import L2 nor safely copy
+fourteen security rules.
+
+`posture.py` contract:
+- It exports `KNOWN_POSTURES` (moved; L2 re-exports the same object), `Posture` (the dataclass L2 returns
+  today, moved unchanged), `PostureError(Exception)` with attribute `rule: str ∈ {"V1", …, "V14"}`, and
+  `load_posture(repo_root: Path, name: str) -> Posture`.
+- **Rule semantics are byte-for-byte the current `agent_invoke_cli.py:302-413`.** That includes V14's
+  absolute-token rejection and the sha256 over `settings_bytes + b"\0" + sidecar_bytes`. The only change
+  is that each failure raises `PostureError(rule=…)` in place of the two L2-private exceptions.
+- It imports only the standard library: `json`, `os`, `re`, `hashlib`, `dataclasses`, `pathlib`. **No
+  `yaml`**, so TD-D23's "exactly one third-party import in L2" invariant is untouched.
+
+`agent_invoke_cli.load_posture` becomes an adapter. It calls `posture.load_posture`, maps
+`PostureError(rule="V1")` to `_UsageError` (exit 2, as today), and maps every other rule to
+`_PreflightFailure("posture_invalid")` (as today). The stale "V1-V11" header (`:298`) and the stale
+"V2-V11" docstring (`:305`) are corrected in the same edit.
+
+**This is a refactor of built, reviewed W1 code**, so its acceptance is behavioural: the full existing
+`tests/automation/test_agent_invoke_cli.py` and `test_agent_invoke_wrapper.py` suites pass **without
+modification** (T5.46). Because posture validation is a security control, the W5 PR's review set must
+include `security-reviewer` on this hunk specifically.
+
+#### C.2.9 The extension point #1644 T3.1 uses
+
+T3.1 (`contract/stages/core.yaml`, ADR-1644 AD-C1) adds a kind by making **exactly** these changes and no
+others to W5's code:
+
+1. **One `KINDS` row** in `dimension_registry.py`: the stage-graph `schema` string (T3.1's TD names it;
+   `hos.stage-graph` is illustrative only), `directory="contract/stages"`, `pack_source="stages.yaml"`,
+   `handler_module="scripts.automation.lib.stage_registry"`, its closed `top_level_keys` per owner,
+   `core_only_keys` (per AD-C1, at least the stage and transition declarations, since only CORE declares
+   them), and `project_only_keys` (its own choice; it may be empty).
+2. **One handler module**, `scripts/automation/lib/stage_registry.py`, exposing
+   `resolve(docs: tuple[LayerDoc, ...], ctx: LoadContext) -> <its resolved type>` and
+   `to_json(<resolved>) -> dict`. It implements AD-C1's load checks (unreachable stage, non-terminal stage
+   with no outgoing transition, PACK/PROJECT declaring or removing a stage or transition, cap above
+   maximum, stage-timeout-plus-margin > budget) as **its own** dim-specific-style rules with their own
+   codes and order, raising only `RegistryError`.
+3. **One `_REGISTRY_KINDS` row** in the installer (§C.2.11 item 2): `stages.yaml:contract/stages`.
+
+**What the engine guarantees T3.1, so its TD need not re-specify them:**
+- File location and the absent-`project.yaml` and absent-`pack-<n>.yaml` semantics.
+- The pack set (§C.2.5), and the generic rules L1–L5, L18, L20 and L22–L26 in §C.2.6's order.
+- YAML parsing.
+- Ordered `LayerDoc`s (core first, packs in closure order, project last).
+- Fail-closed wrapping of handler crashes (L26).
+- The installer copying `packs/<n>/stages.yaml` to `contract/stages/pack-<n>.yaml`, pruning stale ones,
+  and emitting manifest rows (§C.2.11).
+
+**The runtime hook.** ADR-1644 AD-C1 requires the fits-one-cycle check to run **again at executor start
+against the live `HOS_CRON_MAX_SECONDS`** (`ADR-1644:236-241`). The engine never reads the environment.
+The executor passes `runtime={"cron_max_seconds": <int>}` to `load_registry`, and the handler reads
+`ctx.runtime`. The dimensions handler ignores `runtime`. The load-time check uses the default and the
+executor-start check uses the live value, with one loader and no environment read in L1.
+
+**What T3.1 must not do:** add a second YAML reader, read `PACK=`, re-derive the pack closure, add a
+`register_kind()` call, or put kind-specific behaviour into the engine. If T3.1 finds the generic rule set
+wrong for graphs, that comes back to this document as a contract change. It is not patched around in
+the handler.
+
+#### C.2.10 `run_post_change_sweep.sh` (TD-D29, TD-D30) — supersedes §7.9's usage line, exit codes, and interpreter
+
+**TD-D29 — the input grammar is today's, unchanged. `--framework-only` is removed. `--json` is added.**
+
+```
+Usage: run_post_change_sweep.sh [--json] [HEAD<ref-suffix> | --staged | <file> ...]
+```
+- Changed-file computation is **byte-for-byte today's** (`:40-53`). An explicit file list wins, then
+  `--staged` (`git diff --cached --name-only`), then a positional `HEAD*` ref (`git diff --name-only
+  <ref>`). With none of those, it uses `git diff --name-only HEAD`, falling back to `HEAD~1` when that is
+  empty. Today's quirk is kept and stated: a non-`HEAD*` ref such as `origin/main` is taken as a *file
+  name*. Fixing that quirk is out of scope, because the pointer contract is "keeps today's input grammar".
+- **`--framework-only` is removed.** It filtered on `categorize()`'s `framework` domain, which no longer
+  exists. The framework-validator binding it surfaced is HOS-only PROJECT data (§7.2), and it already
+  appears in HOS's plan without a flag. Passing it is **exit 2**, with the stderr line
+  `run_post_change_sweep.sh: --framework-only was removed by ADR-1643 W5 (AD-11); the plan now comes from the registry`.
+  It is never silently ignored.
+- `--json` makes stdout exactly the CLI's `plan` JSON (T5.30, unchanged).
+- The script passes the computed list to `dimension_registry_cli.py plan --changed-file <p> …`. **When the
+  list is empty** it calls `dimension_registry_cli.py resolve` instead, so a broken registry still
+  fails. It then prints `No changed files — no review dimension applies.` (or, under `--json`, `[]`) and
+  exits 0.
+
+**Exit codes (replace both today's and §7.9's):**
+
+| Exit | Meaning |
+|---|---|
+| `0` | Explained. This **includes an empty change set**, which used to be exit 1. TD-VF-19 found no caller of the old meaning |
+| `1` | The registry could not be explained: any `RegistryError` (the CLI's `dimension_registry: <code>: …` line passed through on stderr), no interpreter resolvable, or `dimension_registry_cli.py` absent (TD-D30) |
+| `2` | Usage error, including `--framework-only` and unknown flags |
+
+**TD-D30 — the interpreter is resolved by Amendment A's ladder, and a missing CLI fails closed.** The
+script resolves Python with the **same three rungs, in the same order** as `bootstrap/invoke_agent.sh`
+(TD-D22):
+1. `$HOS_REGISTRY_PYTHON` if set. If it is set but not executable, exit 1.
+2. `<repo>/scripts/oversight/.venv/bin/python` if executable.
+3. `python3` on `PATH`.
+
+If none resolves, exit 1 with a stderr line naming all three and `bash scripts/oversight/ensure_venv.sh`.
+**Before** launching, it checks that `<repo>/scripts/automation/dimension_registry_cli.py` is a regular
+file. If it is not, the script exits 1 with:
+`run_post_change_sweep.sh: scripts/automation/dimension_registry_cli.py is not installed — the registry is not available in this checkout (ADR-1643 TD-VF-21)`.
+That line is the expected outcome on every consumer install until §C.4 Q1 is ruled. It is loud and
+non-zero, never a silent empty plan. The ladder is **duplicated** from `invoke_agent.sh`, not sourced
+from it. T5.48 pins the two to the same rungs, and extracting a shared helper is §C.4 Q2.
+
+The other §7.9 bullets stand: `categorize()` and the Track block are deleted, the last two lines are
+deleted, the CLAUDE.md row is reworded, and the agent edit is deferred to W7 (ESC-K).
+
+#### C.2.11 Installer — supersedes §7.7 items 1, 2 and 4 (TD-D31, TD-D32)
+
+**Item 1 (revised) — fourteen individual lines are added to `framework_consumer_files.txt`.** They are
+`contract/dimensions/core.yaml`, `contract/dimensions/project.yaml.template`, the four
+`contract/dimensions/postures/*.{settings,hos}.json` files, and **the eight**
+`contract/dimensions/prompts/{code-review,security,privacy,reliability,ops,ui,a11y,infra}.md` (TD-VF-18).
+Each is one literal path, because the loop is literal-file only (`:1906-1916`). This edit alone gives
+overwrite-on-upgrade and `.hos-manifest` tracking, both through the existing list. **Never listed:**
+`contract/dimensions/project.yaml` (HOS's own PROJECT layer, TD-D19) and `contract/resolved-packs.txt`
+(installer-generated per target, §C.2.5). T5.47 asserts both absences.
+
+**Item 2 (revised) — TD-D31: pack data is copied by one table-driven step that runs once, outside the
+per-agent loop, after Phase B.**
+- **Table.** One bash array literal, `_REGISTRY_KINDS=( "dimensions.yaml:contract/dimensions" )`, where
+  each row is `<pack_source>:<directory>`. T3.1 appends its row. T5.44 asserts that this array equals
+  `{(k.pack_source, k.directory) for k in KINDS.values()}`.
+- **Pack directories are resolved once.** At R3 (`:1287-1288`), the already-resolved `$_pack_dir` is
+  appended to a parallel array `_resolved_pack_dirs`. The new step reads that array and **never calls
+  `_resolve_pack_dir` again** (the B-4 rule: it logs).
+- **Placement.** The step runs once per install, in the `contract/` section (after `:2122`) and before
+  the `.hos-manifest` block (`:2191`). Phase A's abort exits 4 before this point (`:1634`), so a
+  drift-blocked install writes no registry data, which preserves decide-all-then-act (TD-VF-15).
+- **Behaviour, for each kind row:**
+  1. For each pack in `_resolved_packs` order, if `<pack_dir>/<pack_source>` exists, run
+     `cp_framework_file` to `<directory>/pack-<slug>.yaml`.
+  2. Then, for every `<directory>/pack-*.yaml` on disk whose slug is not in `_resolved_packs`, remove it
+     through `run`, so that `--dry-run` prints the deletion and does not perform it. This replaces §7.7
+     item 2's second bullet with the same semantics, applied per kind.
+- **Then, once and not per kind**, write `contract/resolved-packs.txt` per §C.2.5 from `_resolved_packs`.
+  Under `--dry-run`, print the would-be contents instead. Under `--no-pack` the file has zero slug lines.
+
+**Item 4 (revised) — TD-D32: manifest rows for generated files are emitted explicitly.** The installer
+keeps an array, `_generated_whole_rows`. After each successful copy in item 2, and after writing
+`resolved-packs.txt`, it appends `"<target-relative-path>\tWHOLE\t<sha256 of the TARGET file>"`, computed
+with the existing `_sha256`. The array is concatenated with `enumerate_framework_files`' output before
+it feeds `assemble-manifest` (`:2232-2253`). Under `--dry-run` nothing is appended, which matches the
+existing dry-run manifest branch (`:2230-2231`). The **L20 belt-and-braces point from §7.7 item 4 stands
+unchanged**: the loader still enforces L20, because `--prune` is opt-in and a hand-copied tree can still
+carry a stale file.
+
+Items 3 (`project.yaml` is never created) and 5 (no `--squash` interaction) **stand**.
+
+#### C.2.12 Tests — additions to §9.5
+
+- **T5.3** splits into **T5.3a** (L3a, including a stage-schema file in `contract/dimensions/`) and
+  **T5.3b** (L3b).
+- **T5.5, T5.12 and T5.18** assert the renamed codes: `core_only_key`, `posture_invalid` and
+  `project_only_key`.
+- **T5.32 (re-pointed):** a `pack-<n>.yaml` whose `<n>` is absent from `contract/resolved-packs.txt` gives
+  `stale_pack_file`. A companion case has `config.sh` say `PACK="<n>"` while the file omits `<n>`, and
+  must still give `stale_pack_file`. That proves `PACK=` is not read.
+- **T5.34–T5.40:** one test per new rule, L22–L28, each asserting its exact code. T5.36 covers an absent
+  file, a bad slug, a duplicate slug, and an explicit `packs=` with a duplicate.
+- **T5.41:** the check order. One two-defect fixture per adjacent pair at the step boundaries of TD-D28
+  (L20 with L3a, L5 with L23, L27 with L10, L17 with L19) asserts the earlier code.
+- **T5.42:** a resolved pack closure `{node, astro}` in `resolved-packs.txt`, with `config.sh`
+  `PACK="astro"` and both `pack-*.yaml` present, **loads cleanly**. This is the regression test for
+  TD-VF-16.
+- **T5.43:** `to_json(load(root))` is byte-identical to
+  `registry_to_json(DIMENSIONS_SCHEMA, load_registry(root, DIMENSIONS_SCHEMA))`.
+- **T5.44:** `_REGISTRY_KINDS` in `hos_install.sh` equals the `KINDS` table's `(pack_source, directory)`
+  pairs.
+- **T5.45 (the seam, proven without T3.1):** a test-only `KindSpec` and a fixture handler are patched into
+  `KINDS`, and the test then checks four things. The generic rules fire for it (L1, L3a, L5, L20, L23).
+  The handler receives `LayerDoc`s in closure order. A handler that raises `KeyError` gives
+  `kind_handler_failed`. `runtime=` reaches `ctx.runtime` unchanged.
+- **T5.46:** (a) the existing W1 suites pass unmodified (TD-D26's gate). (b) `posture.load_posture`
+  raises `PostureError` with the right `rule` for one fixture per V1–V14. (c) L12 surfaces each of those
+  as `posture_invalid` with the rule id in the message.
+- **T5.47 (installer):** `--pack astro` writes `resolved-packs.txt` as `node` then `astro`. `--no-pack`
+  writes zero slug lines. Each `pack-<n>.yaml` is copied **once**, asserted by counting the
+  `cp_framework_file` log lines per target. `.hos-manifest` holds WHOLE rows for every
+  `pack-<n>.yaml` and for `resolved-packs.txt`, with the target's sha256. `framework_consumer_files.txt`
+  lists all 14 item-1 paths and lists neither `project.yaml` nor `resolved-packs.txt`. A drift-blocked
+  (exit 4) install leaves `contract/dimensions/` untouched.
+- **T5.48 (sweep):**
+  - Each of today's four input forms produces the same changed-file list as the pre-rewrite script, in a
+    characterisation test written before the rewrite.
+  - `--framework-only` exits 2 with the named line.
+  - An empty change set exits 0, after `resolve` ran.
+  - A `RegistryError` exits 1, with the code on stderr.
+  - An absent CLI exits 1, with the TD-VF-21 line.
+  - The three interpreter rungs behave as T1.50-style cases.
+  - The ladder's rungs match `invoke_agent.sh`'s.
+
+### C.3 Startup-gap analysis and affected sign-offs
+
+*Should this have been settled in the initial technical design?*
+- **Schema-parametricity: no.** It arises from ADR-1644 SEAM-1, a binding input that postdates §7. This is
+  a late requirement, not a missed one.
+- **TD-VF-15…TD-VF-21: yes.** Every contradicted fact was in the tree when §7 was written:
+  - the leaf-only `PACK=` (#1036 closure);
+  - the source-path manifest enumeration;
+  - the literal-path ship loop;
+  - the sweep's grammar and exit codes;
+  - V12–V14, which landed with Amendment 5 after §7 but before this amendment.
+
+  §7.7 claimed to be "verified against `hos_install.sh`'s actual implementation", and in these respects
+  it was not. **This is a `startup-artifact-gap`. The orchestrating session should open or annotate
+  one.** I file nothing (task constraint).
+
+**Affected sign-offs:**
+- **W5:** unbuilt. No code was approved against the old §7, so there are **no orphaned approvals**.
+- **W1:** the sign-offs on `agent_invoke_cli.py` **stand**, because W1's behavioural contract (V1–V14
+  outcomes and exit codes) is unchanged. TD-D26 adds new code, the extraction itself, and that code
+  needs **fresh** review in the W5 PR: `code-reviewer` plus `security-reviewer`. Prior W1 approvals do
+  not cover it.
+- **W2–W4, W4b:** untouched. Their sign-offs stand.
+- **#1644 T3.1:** its future TD now builds on §C.2.9. No T3.1 design has been approved yet, so nothing is
+  invalidated.
+
+### C.4 Open questions and escalations
+
+To `architect` (blocking W5's coder only where marked):
+
+- **Q1 (BLOCKING for the consumer half of W5; ESC-E is extended):** TD-VF-21. The W5 sweep is shipped, but
+  the registry it calls is not. Option (a): ship `scripts/automation/{__init__.py, lib/__init__.py,
+  lib/dimension_registry.py, lib/posture.py, dimension_registry_cli.py}` in W5. That brings the consumer
+  PyYAML dependency with it, since consumers have no venv (Amendment A). Option (b): take
+  `run_post_change_sweep.sh` out of the consumer ship-set until W7 makes the ESC-E ship-set decision.
+  Until a ruling, TD-D30 makes the consumer outcome a loud exit 1, which is correct but not useful. I
+  have not chosen, because this is ESC-E's decision and ESC-E was routed to the architect.
+- **Q2 (non-blocking):** should the interpreter ladder move into one sourced helper (for example
+  `bootstrap/lib/resolve_python.sh`) for `invoke_agent.sh` and the sweep? TD-D30 duplicates it and pins
+  the copies with T5.48. A helper would mean editing `invoke_agent.sh`, which is built W1 code, so I
+  did not specify it.
+- **Q3 (non-blocking):** TD-D25 keeps the engine at AD-9's bound path, `dimension_registry.py`, although
+  it now loads the stage graph too. A rename to something like `registry.py`, with a `dimension_registry`
+  shim, would be an AD-9 path change and is the architect's call.
+- **Q4 (confirm):** L5 and L18 are generalised and their codes renamed (`core_only_key`,
+  `project_only_key`), and L12's code becomes `posture_invalid`. W5 is unbuilt, so nothing depends on the
+  old codes. Please confirm the renames rather than inherit them.
+
+To a **human** (gated on the protected-surface PR in any case): `contract/resolved-packs.txt` is a new
+installer-written file under `contract/**`. In a consumer repo, every pack change therefore becomes a
+CODEOWNERS-gated diff in two places, the pack YAML and this file. I judge that correct, since the pack set
+is governance data, but it is a new class of generated protected-surface file, and a human should see
+it named.
+
+---
+
+## Human Review Required — Amendment C (2026-10-02, schema-parametric W5 loader)
+
+**RISK: MEDIUM.** The amendment governs:
+- the loader that gates the overseer's review set, so a fail-open there would let a configuration require
+  nothing;
+- where a security control (posture validation, V1–V14) lives;
+- the installer's handling of data files under a protected surface.
+
+Nothing is built against it yet. The one built-code change (TD-D26) has to preserve behaviour, and
+the unmodified W1 suites pin that.
+
+**CONFIDENCE:**
+- **HIGH on TD-VF-13…TD-VF-21.** Each was re-read in the tree this session at the cited lines. None is
+  inferred from a document. TD-VF-16, TD-VF-17 and TD-VF-19 each quote the installer's or the script's
+  own comments.
+- **HIGH that the dispatch seam satisfies SEAM-1 and AD-12.** There is one engine, one ownership model,
+  `schema:` as the declared kind, and handlers that never re-implement file location, pack resolution or
+  YAML.
+- **MEDIUM on the rule classification at the margin.** L6 and L7 (id uniqueness and namespacing) are
+  classified dimension-specific because AD-C1's "exactly one binding per stage" may want different
+  semantics. If T3.1 finds it wants them generic, promoting them is additive.
+- **MEDIUM on TD-D29's exit-0 for an empty change set.** No programmatic caller exists (verified), but
+  `docs/` and operator habit may assume exit 1. Those docs are W5's to update.
+
+**BLAST RADIUS:**
+- **This document:** the Amendment A/B/C header block; the pointer notes in §7.3, §7.4, §7.7 and §7.9;
+  and this Amendment C body.
+- **Downstream (W5's coder):** `scripts/automation/lib/{dimension_registry,posture}.py`,
+  `scripts/automation/{dimension_registry_cli,agent_invoke_cli}.py`,
+  `scripts/framework/run_post_change_sweep.sh`, `scripts/framework/framework_consumer_files.txt`,
+  `bootstrap/hos_install.sh` (the R3 parallel array, the new registry-data step, and the manifest
+  concatenation), and `contract/resolved-packs.txt`.
+- **Forward:** #1644 T3.1's design surface (§C.2.9).
+- **Not touched:** W1–W4/W4b contracts, the AD-6 document, the classifier, and every §7 section that
+  §C.2.1 marks "stands".
+
+**Change classification: ADDITIVE.** No built contract is reversed: W5 is unbuilt, and W1's posture
+behaviour is preserved. The amendment adds a seam, a generated file, seven rules and three corrections of
+unbuilt instructions. I have not classified it STRUCTURAL. If the architect judges either of the
+following structural, it goes to a human before the coder starts:
+- `resolved-packs.txt`, as a new installer disposition under `contract/**`;
+- the change in the shipped sweep's exit-1 meaning.
+
+**Architect review is requested.** This amendment is not handed to the coder until the architect
+approves. Iteration: Amendment C round 1. No temp-state file was written, because this dispatch was
+constrained to edit this one file only.
+
+**Not done here:** no application code, test code or script was written. No issue was filed and no
+label was created. No sign-off register entry was written (`technical-design` writes none).
