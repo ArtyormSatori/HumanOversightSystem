@@ -1,0 +1,1 @@
+{"actor":"hos-overseer-hos[bot]","event":"idempotent-skip","head_sha":"165fecc3de18e587bad93c4cd2e81eeb6b12709e","pr":1943,"reason":"#1215: HUMAN_REQUIRED verdict (review 5397380530) already posted on this head; no commits, comments, reviews or label changes since"}
