@@ -1,0 +1,1 @@
+{"agent":"overseer","event":"idempotent-skip","head_sha":"9feb133c1f268913fd277ba9c6efc2a2500b2283","pr":1926,"prior_decision":"PROPOSE_ONLY","reason":"#1215 precheck: verdict review 5388576980 already posted on this head (05:27:28Z); no new commits, comments, reviews or threads since; tests check now SUCCESS does not change the verdict"}
