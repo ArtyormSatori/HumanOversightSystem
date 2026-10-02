@@ -1,0 +1,201 @@
+# contract/dimensions/core.yaml — CORE review dimensions. HOS-owned; overwritten on upgrade.
+# ONLY this file may declare `entries:`. A PACK or PROJECT file containing an `entries:`
+# key is a LOAD ERROR, not a merge (ADR-1643 AD-9).
+schema: hos.dimension-registry
+schema_version: 1
+owner: core
+
+entries:
+  - id: code-review
+    kind: judgment
+    title: General code quality, design conformance, and idioms
+  - id: security
+    kind: judgment
+    title: Security lens
+  - id: privacy
+    kind: judgment
+    title: Privacy and data-handling lens
+  - id: reliability
+    kind: judgment
+    title: Resilience to external-dependency failure
+  - id: ops
+    kind: judgment
+    title: Telemetry-spec conformance
+  - id: ui
+    kind: judgment
+    title: UI/UX conformance
+  - id: a11y
+    kind: judgment
+    title: Accessibility
+  - id: infra
+    kind: judgment
+    title: Infrastructure and deployment
+  - id: lint
+    kind: deterministic
+    title: Linting
+  - id: type-check
+    kind: deterministic
+    title: Static type checking
+  - id: secret-scan
+    kind: deterministic
+    title: Secret detection
+  - id: security-scan
+    kind: deterministic
+    title: Static security analysis
+  - id: bash-check
+    kind: deterministic
+    title: Shell script checks
+  - id: portability
+    kind: deterministic
+    title: Portability signals
+  - id: template-refs
+    kind: deterministic
+    title: Template reference integrity
+  - id: collection-integrity
+    kind: deterministic
+    title: Collection integrity
+  - id: cross-vendor-review
+    kind: deterministic
+    title: Cross-vendor second review
+
+bindings:
+  # ── judgment bindings ─────────────────────────────────────────────────────
+  - id: core:code-review/code
+    entry: code-review
+    kind: judgment
+    agent: code-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/code-review.md
+    predicate:
+      include: ['\.py$', '\.sh$', '\.js$', '\.ts$', '\.jq$']
+      exclude: ['^tests/', '/test_[^/]*\.py$', 'conftest\.py$', '/\.venv/']
+
+  - id: core:security/code
+    entry: security
+    kind: judgment
+    agent: security-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/security.md
+    predicate:
+      include: ['\.py$', '\.sh$', '\.js$', '\.ts$', '^\.github/workflows/']
+      exclude: ['/\.venv/']
+
+  - id: core:reliability/code          # TD-D12 — no predicate existed to migrate
+    entry: reliability
+    kind: judgment
+    agent: reliability-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/reliability.md
+    predicate:
+      include: ['\.py$', '\.sh$', '\.js$', '\.ts$']
+      exclude: ['^tests/', '/\.venv/']
+
+  - id: core:ops/code                  # TD-D12 — no predicate existed to migrate
+    entry: ops
+    kind: judgment
+    agent: ops-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/ops.md
+    predicate:
+      include: ['\.py$', '\.sh$', '\.js$', '\.ts$']
+      exclude: ['^tests/', '/\.venv/']
+
+  - id: core:privacy/governance
+    entry: privacy
+    kind: judgment
+    agent: privacy-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/privacy.md
+    predicate:
+      include: ['^audit/', '^scripts/automation/lib/github\.py$', '\bsecret', '\btoken\b']
+
+  - id: core:infra/deploy
+    entry: infra
+    kind: judgment
+    agent: infra-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/infra.md
+    predicate:
+      include: ['^\.github/workflows/', '^bin/', '\.env\.example$']
+
+  # `ui` and `a11y` carry a CORE fallback binding (TD-D20, rule L19): a project with no
+  # UI pack installed must still load. Packs add more specific bindings alongside.
+  - id: core:ui/markup
+    entry: ui
+    kind: judgment
+    agent: ui-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/ui.md
+    predicate: { include: ['\.html$', '\.htm$', '\.css$', '\.scss$', '\.svelte$', '\.vue$', '\.jsx$', '\.tsx$'] }
+  - id: core:a11y/markup
+    entry: a11y
+    kind: judgment
+    agent: a11y-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/a11y.md
+    predicate: { include: ['\.html$', '\.htm$', '\.svelte$', '\.vue$', '\.jsx$', '\.tsx$'] }
+
+  # ── deterministic bindings ────────────────────────────────────────────────
+  # Tool invocation arguments are W7's. W5b binds existence and applicability only.
+  - id: core:lint/all
+    entry: lint
+    kind: deterministic
+    tool: scripts/oversight/gates/lint_check.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:type-check/all
+    entry: type-check
+    kind: deterministic
+    tool: scripts/oversight/gates/type_check.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:secret-scan/all
+    entry: secret-scan
+    kind: deterministic
+    tool: scripts/oversight/gates/secret_scan.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:security-scan/all
+    entry: security-scan
+    kind: deterministic
+    tool: scripts/oversight/gates/security_scan.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:bash-check/all
+    entry: bash-check
+    kind: deterministic
+    tool: scripts/oversight/gates/bash_check.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:portability/all
+    entry: portability
+    kind: deterministic
+    tool: scripts/oversight/gates/portability_check.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:template-refs/all
+    entry: template-refs
+    kind: deterministic
+    tool: scripts/oversight/gates/template_refs_check.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:collection-integrity/all
+    entry: collection-integrity
+    kind: deterministic
+    tool: scripts/oversight/gates/collection_integrity.sh
+    timeout_seconds: 300
+    predicate: { include: ['.*'] }
+  - id: core:cross-vendor-review/all
+    entry: cross-vendor-review
+    kind: deterministic
+    tool: scripts/run_second_review.sh
+    timeout_seconds: 1800
+    predicate: { include: ['.*'] }
