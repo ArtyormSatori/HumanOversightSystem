@@ -1,0 +1,48 @@
+schema: hos.dimension-registry
+schema_version: 1
+owner: pack
+pack: astro
+
+bindings:
+  - id: pack-astro:code-review/astro
+    entry: code-review
+    kind: judgment
+    agent: code-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/code-review.md
+    predicate: { include: ['\.astro$', '^src/pages/', 'astro\.config\.[^/]*$'] }
+
+  - id: pack-astro:security/astro
+    entry: security
+    kind: judgment
+    agent: security-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/security.md
+    predicate: { include: ['\.astro$', 'astro\.config\.[^/]*$'] }
+
+  - id: pack-astro:ui/astro
+    entry: ui
+    kind: judgment
+    agent: ui-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/ui.md
+    predicate: { include: ['\.astro$'] }
+
+  - id: pack-astro:a11y/astro
+    entry: a11y
+    kind: judgment
+    agent: a11y-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/a11y.md
+    predicate: { include: ['\.astro$'] }
+
+  - id: pack-astro:deterministic/astro-check
+    entry: lint
+    kind: deterministic
+    tool: scripts/oversight/gates/astro_check.sh
+    timeout_seconds: 300
+    predicate: { include: ['\.astro$', 'astro\.config\.[^/]*$', '^src/pages/', '^src/content/'] }
