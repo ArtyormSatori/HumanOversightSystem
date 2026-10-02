@@ -1,0 +1,1 @@
+{"actor":"hos-overseer-hos[bot]","composite":0.2587,"disposition":"PROPOSE_ONLY","event":"pr-review","head_sha":"ebc6129251edc664aa945b2d8095506fe919feee","pr":1941,"reason":"Server-side gate not detected (DEP[#152-followup]); #1653/#1588. Docs-only TD Amendment D, no merits findings; needs-ai withheld (#1557)","review_id":5396018516,"tier":"HIGH","tier_floor":"HIGH"}
