@@ -1,0 +1,1 @@
+{"actor":"hos-overseer-hos[bot]","event":"pr-review-skipped-idempotent","head_sha":"7a363ccf956e050b03a68d43b452c9e75a4739ae","pr":1929,"prior_review_id":5393399834,"reason":"#1215 precheck: verdict already posted at this head; only change since is tests CI completing green, which does not alter PROPOSE_ONLY/NO ACTION"}
