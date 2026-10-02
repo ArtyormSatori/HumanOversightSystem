@@ -1198,3 +1198,162 @@ consequence. Where an item conflicts with the text above, the item governs.
   affected.
 
 No `startup-artifact-gap` issue is recommended for this erratum.
+
+---
+
+## Erratum 2 (2026-10-02): T3.0b technical-design review, round 1
+
+Raised by the architect's review of `docs/v0.7.0/TECHNICAL-DESIGN-1644-T3.0b-pr-classifier.md`
+(DRAFT-1) against `REQUIREMENTS-1644-AMENDMENT-2-esc1-pr-side.md` (PM-6). **No decision above is
+rewritten.** Each item below corrects a premise, binds a stricter reading, or records a consequence.
+Where an item conflicts with the text above, the item governs.
+
+- **E6 (AF-C2 and §6 ARCH-ESC-1: an incomplete premise; ARCH-ESC-1 is re-opened as ARCH-ESC-1R).**
+  AF-C2 and ARCH-ESC-1 say #1198 "made #1162 its prerequisite" and that #1162 "is now in
+  `submit_pr.sh`". **That is incomplete, and the human ruled on it.** `DECISIONS.md` (2026-08-09, #1198,
+  human-ratified) retained the serialization and deferred any concurrency to **#1313** (open,
+  `needs-human`, v0.8.0). #1313 gates concurrency on:
+  - P1 (blocking): the force-push bypass of `submit_pr.sh` in `bootstrap/worker-cron-prompt.md:90`;
+  - P2 (blocking): branch protection `required_status_checks.strict: true`. It is still `false`
+    (`scripts/framework/setup_branch_protection.sh:177`);
+  - P4: a named, declared post-merge verification control;
+  - P5 (blocking): a field observation of the #1162 guard firing;
+  - plus a submit-time file-overlap refusal, predeclared abort criteria with a revert trigger, and a
+    narrower shape: N = 2, with the second PR allowed only while the first is approved and awaiting
+    merge.
+
+  #1313 also records the `dismiss_stale_reviews: true` hazard: concurrency can *increase* the human's
+  work when a sibling merge forces a re-approval. None of this was in front of the human on #1912.
+
+  A human ruling made on a premise that its author has since found incomplete is not cleared for the
+  facts it was not shown. Under the product-boundary checkpoint, **ARCH-ESC-1 is re-opened as
+  ARCH-ESC-1R** (the text is below). **T3.0b's `coder` handoff is blocked until ARCH-ESC-1R is answered.**
+  - ESC-2 to ESC-7 on #1912 are unaffected.
+  - T3.0b's design work is not blocked.
+- **E6a (threshold wording).** ARCH-ESC-1's "allowed while **≤ 3** … at 3, new work blocks" disagrees with
+  itself at *H* = 3. The binding reading is PM-6's: **ALLOWED iff *H* < 3**.
+  - A cycle opens at most one PR (`worker-cron-prompt.md:139`, submit then STOP).
+  - Overseer-pending and worker-actionable PRs block.
+  - So the steady-state maximum is **3 open worker PRs in total**, against today's 1 and #1313's 2.
+  - The bounce re-entry can briefly add the bounced draft until it is closed.
+- **E7 (AD-C6 T-NS5).** "One open PR in each H4 shape" names three shapes. Read literally, that gives
+  *H* = 3, which E6a blocks. The three shapes have **two** carriers, because a HUMAN_REQUIRED verdict
+  reaches the PR as `needs-human` (PM-6 VF-P2). So:
+  - **T-NS5** is one PR per carrier (*H* = 2) plus an eligible issue, which gives `ALLOWED`;
+  - **T-NS5-shapes** is each of the three shapes alone, giving `ALLOWED` with *H* = 1;
+  - **T-BD1** is three human-pending PRs, giving `BLOCKED`.
+  This is a correction to the test, not to the ruling.
+- **E8 (§5 T3.0b row, "behavior is preserved").** There is one deliberate exception: **unknown PR state
+  fails closed.** A list read failure, an unparseable list, a list beyond the pagination cap, or a
+  classifier crash or invalid output gives `NEW WORK: BLOCKED` (`pr-state-unknown`). Today it gives
+  `ALLOWED`.
+  - §1's governing constraint ("never resolves to 'not blocked'") governs this module.
+  - A bound that a failed read can bypass is not a bound.
+  - This is a correction, not a product change that needs routing. It removes a fail-open that no
+    ruling authorized. Its only user-visible cost is one cycle without new work per failed read, and
+    that cost is audited (`cycle-pr-state-unknown`).
+  - The empty-slug path that the TD cited (its TD-F8) is **unreachable**: `bin/hos-cron:913-916` already
+    exits the cycle fail-closed on an empty slug (#912).
+- **E9 (carrier narrowing, bound strictly).** A PR is human-pending only on a positive read of all the
+  following:
+  - not draft;
+  - no `hos-halt`;
+  - both the detail and the reviews read succeeded;
+  - **and** either `needs-human` is on the PR, **or** there is an `APPROVED` review whose `commit_id`
+    equals `head.sha`, **whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`, and whose
+    `user.login` does not end in `[bot]`**.
+
+  The author restriction closes a zero-cost path. Without it, any account able to post a review
+  (anyone, on a public repository) could turn an overseer-pending PR into a human-pending one and
+  release new work. Excluding bot approvals fails toward blocking. Under #1657 the overseer does not
+  post `APPROVED` on the PRs that wait on a human anyway. Each narrowing counts *fewer* PRs than the
+  ruling would, so none needs routing.
+- **E10 (AC-8 and list truncation).** The PR list is read at `per_page=100`, and the classifier follows
+  `&page=2` and `&page=3` **only while the previous page was full**. A full third page is DEGRADED.
+  - Requests are unchanged for any repository with fewer than 100 open PRs.
+  - Without pagination, a consumer with 100 or more open PRs (all authors) would be permanently
+    `BLOCKED`. With today's single page of 20, the worker's own PRs on page 2 are invisible (fail-open).
+- **E11 (P1, closed inside T3.0b).** `worker-cron-prompt.md:90` tells the fallback path to force-push.
+  That contradicts `worker.md:411` ("no `--force`"), and it is #1313's P1.
+  - T3.0b deletes the force-push branch. A dirty PR on that path is closed with a comment, and its
+    unique commits are re-submitted through `bootstrap/create_branch.sh` and `bootstrap/submit_pr.sh`,
+    which is the path's own existing second alternative.
+  - This is a fallback-only path, reachable only when the directive is absent. It is stricter, so it is
+    bound here rather than routed.
+- **E12 (AC-5 over AC-7).** A fixture that today renders `awaiting-merge` but has an unreadable detail or
+  reviews read now renders `needs-attention` (fail-closed, PM-6 AC-5). AC-7's byte-identity applies to
+  fixtures whose routing today is `none`, `needs-fix`, `needs-fix-bounce` or `needs-attention`. Both
+  outcomes are BLOCKED.
+- **E13 (forward items).**
+  - **T3.7a:** the #1847 visibility notice stays model-posted in T3.0b, which is today's mechanism.
+    T3.7a's deterministic finalize step must absorb it, with marker idempotency. Until then, AC-6's
+    "exactly once" is pinned only by the deterministic directive and the prompt contract.
+  - **T3.7a/T3.7b:** AD-C13's cross-cycle carrier is a draft PR, and the classifier classifies a draft as
+    overseer-pending (`draft`), which BLOCKS new work. The T3.7 design must say how a stage-draft PR is
+    classified before any stage-draft PR ships. The rule cannot be silently inherited.
+
+**ARCH-ESC-1R (for the human; blocks T3.0b's `coder` handoff).** The text to file as a decision
+issue:
+
+> On #1912 you cleared ARCH-ESC-1 (bound 3). The ADR text you ruled on said #1162 was #1198's only
+> prerequisite for concurrency. That was incomplete. Your 2026-08-09 ratification of #1198 kept
+> serialization and deferred concurrency to **#1313**. #1313 gates it on P1 (the force-push bypass),
+> P2 (branch protection `strict: true`), P5 (field evidence the #1162 guard fires), P4 (a named
+> post-merge check), a submit-time file-overlap refusal, predeclared abort criteria, and a narrower
+> shape: at most 2 PRs, the second only while the first is approved. It also warns that
+> `dismiss_stale_reviews` can make you re-approve a PR after its sibling merges.
+>
+> **The facts as of 2026-10-02:**
+> - **P1:** it will be closed inside T3.0b. The architect bound this.
+> - **P5:** the guard has fired at least three times (2026-09-14, `stale-base-merged`, behind main by 2
+>   to 4 commits). The records exist only in a clone's uncommitted audit log (#1803).
+> - **P3:** shipped.
+> - **P2:** not done (`strict: false`).
+> - **P4:** CI runs only on pull requests. The only post-merge check is the worker's cycle-start test
+>   baseline on `main`, which detects within one worker cycle and auto-files a repair issue.
+> - **Your ruling** allows at most 3 open worker PRs at once (today: 1; #1313: 2).
+> - **Reverting** is one constant: `HUMAN_PENDING_BOUND = 1` reproduces today's serialization exactly.
+>
+> **Q1. With this in view, does ARCH-ESC-1 stand?**
+> - **(a) Yes.** Bound 3 ships in v0.7.0 with the controls in Q2 to Q4. **Recommended.**
+> - (b) Narrow to #1313's shape: at most 2 open worker PRs, the second only while the first is
+>   approved-awaiting-merge (`needs-human` question PRs keep blocking). This requires a T3.0b design
+>   revision.
+> - (c) Defer T3.0b to v0.8.0 behind #1313. The worker keeps idling on human-pending PRs in v0.7.0,
+>   and ESC-8's exception stays unmet on the PR side.
+>
+> **Q2 (if 1a). Branch protection `strict`?**
+> - **(a) Keep `false`, and accept that two worker PRs can merge without CI on their combined state.**
+>   The declared post-merge control is the worker's cycle-start baseline. The abort trigger is a red
+>   baseline traced to two worker PRs that both merged without combined CI, or one human approval
+>   dismissed because a sibling worker PR merged. Either trigger means setting the bound to 1 by a
+>   normal PR. **Recommended.** `strict: true` makes you press "Update branch" before every sibling
+>   merge, which works against the throughput this ruling buys. Whether that update also dismisses
+>   your approval under `dismiss_stale_reviews` is unverified.
+> - (b) Set `strict: true` before T3.0b merges. That is a separate `setup_branch_protection.sh` change,
+>   and you accept the per-merge cost.
+>
+> **Q3. Consumers.** The bound is a literal shipped to every consumer, so their serialization relaxes to
+> 3 on upgrade, with no per-project setting.
+> - **(a) Accept it, call it out in the release notes, and leave per-project limits to #567.**
+>   **Recommended.**
+> - (b) Add a per-project setting that can only *lower* the bound. This requires a T3.0b design
+>   revision: one config read and its tests.
+>
+> **Q4. #1313's disposition.**
+> - **(a) Keep it open in v0.8.0, re-scoped to what is left:** file-overlap refusal, revisiting `strict`
+>   with field data, and the abort-trigger review. **Recommended.**
+> - (b) Close it as superseded by ARCH-ESC-1.
+
+**Startup-gap analysis.**
+- **E6: yes, and it is the ADR's own verification error.** AF-C2 cited #1198's body but not its
+  ratified `DECISIONS.md` outcome or the open #1313 it created. **A `startup-artifact-gap` issue is
+  recommended** (the orchestrator files it, not the architect). Affected sign-offs:
+  - **These stand:** ESC-2 to ESC-7 on #1912, and PM-6 as a record of the ruled semantics. PM-6 needs a
+    revision only under Q1(b) or Q3(b).
+  - **This is suspended until ARCH-ESC-1R:** the ARCH-ESC-1 clearance on #1912, and with it the "T3.0b
+    is unblocked" line.
+  - **None orphaned:** no T3.0b code or review exists.
+- **E6a, E7, E12:** corrections to wording and tests. No sign-off is affected.
+- **E8 to E11:** stricter bindings in an unbuilt slice. No sign-off is affected.
+- **E13:** a forward constraint on unbuilt slices. No sign-off is affected.
