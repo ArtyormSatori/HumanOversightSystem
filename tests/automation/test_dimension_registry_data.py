@@ -255,35 +255,67 @@ def test_t5_51_prompt_files_exactly_the_eight():
     assert all(p.suffix == ".md" for p in PROMPTS.glob("*"))
 
 
-@pytest.mark.parametrize("eid", JUDGMENT_IDS)
-def test_t5_51_prompt_contract(eid):
-    titles = core_titles()
-    assert eid in titles
+def _prompt(eid: str) -> tuple[bytes, str]:
     raw = (PROMPTS / f"{eid}.md").read_bytes()
-    # rule 1
-    text = raw.decode("utf-8")
+    return raw, raw.decode("utf-8")
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule1_encoding_and_length(eid):
+    raw, text = _prompt(eid)
     assert b"\r" not in raw and raw.endswith(b"\n")
     assert len(text.split("\n")) - 1 <= 20
-    # rule 2
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule2_title_line(eid):
+    _, text = _prompt(eid)
+    assert eid in core_titles()
     assert text.split("\n")[0] == f"# Review dimension: {eid}"
-    # rule 3
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule3_sections(eid):
+    _, text = _prompt(eid)
     headings = [ln for ln in text.split("\n") if ln.startswith("#") and not ln.startswith("# ")]
     assert headings == ["## Scope", "## Boundaries"]
-    scope, boundaries = text.split("## Boundaries")
-    # rule 4
-    assert titles[eid] in scope
-    # rule 5
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule4_scope_has_title(eid):
+    _, text = _prompt(eid)
+    scope = text.split("## Boundaries")[0]
+    assert core_titles()[eid] in scope
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule5_boundaries(eid):
+    _, text = _prompt(eid)
+    boundaries = text.split("## Boundaries")[1]
     assert BOUNDARY_SENTENCE in boundaries
     assert "run separately" in boundaries
-    # rule 6
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule6_agent_names_banned(eid):
+    _, text = _prompt(eid)
     for name in _agent_names():
         assert not re.search(rf"(?i)(?<![a-z0-9-]){re.escape(name)}(?![a-z0-9-])", text), name
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule6_delimiters_and_words_banned(eid):
+    _, text = _prompt(eid)
     for bad in ("{{", "}}", "{%", "${", "```"):
         assert bad not in text
     assert not re.search(r"(?i)\bverdict", text)
     assert not re.search(r"(?i)\bapplicab", text)
-    # rule 7 — byte equality with the canonical text
-    assert raw == CANONICAL.format(eid=eid, title=titles[eid]).encode("utf-8")
+
+
+@pytest.mark.parametrize("eid", JUDGMENT_IDS)
+def test_t5_51_rule7_canonical_bytes(eid):
+    raw, _ = _prompt(eid)
+    assert raw == CANONICAL.format(eid=eid, title=core_titles()[eid]).encode("utf-8")
 
 
 def _all_shipped_bindings() -> list[dict]:
@@ -440,7 +472,7 @@ def _new(reg, path: str) -> set[str]:
     return {
         i.binding.agent
         for i in dr.resolve_for_diff(reg, [path])
-        if i.applicable and i.binding.kind == "judgment"
+        if i.applicable and i.binding.kind == "judgment" and i.binding.agent is not None
     }
 
 
