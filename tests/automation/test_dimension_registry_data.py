@@ -369,7 +369,8 @@ def test_t5_53_template_example_loads_and_suppresses(tmp_path):
     reg = dr.load(root, packs=["django"])
     assert "pack-django:privacy/pii-words" not in reg.bindings
     reason = reg.suppressions["pack-django:privacy/pii-words"]
-    assert "stores no personal data" in reason
+    expected = strict_load(example)["suppress"][0]["reason"]
+    assert " ".join(reason.split()) == " ".join(expected.split())
     privacy = {b.id for b in reg.bindings.values() if b.entry == "privacy"}
     assert privacy == {"core:privacy/governance", "project:privacy/app-modules"}
 
@@ -493,8 +494,8 @@ def test_t5_28_coverage(t528_registry):
     seen_domains = {d for _, old, _ in T528_TABLE for d in old.split()}
     assert seen_domains == set(DOMAIN_AGENTS)  # (c) all 8 domains
     paths = [p for p, _, _ in T528_TABLE]
+    plan = {i.binding.id: i for i in dr.resolve_for_diff(t528_registry, paths)}
     for b in t528_registry.bindings.values():
         if b.kind != "judgment":
             continue
-        plan = {i.binding.id: i for i in dr.resolve_for_diff(t528_registry, paths)}
         assert plan[b.id].applicable, f"judgment binding {b.id} matches no corpus path"
