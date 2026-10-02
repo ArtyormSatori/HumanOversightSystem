@@ -7,13 +7,22 @@ human actually asked for. **The proactive percentage check is the core, non-opti
 this issue (FR-1).** Nothing here defers, softens, or re-scopes a ruled item. Every requirement
 traces to a source in §7. Requirements this pass *derived* (implied by a ruling but not stated in
 it) are marked **[DERIVED]** and listed for human confirmation in §8.
+**Amendment 1 (2026-10-02, same day):** Adds four human rulings from the interactive session. Q1
+(poll location) is resolved; `>=` comparison is confirmed; the status-file format is confirmed; the
+#1450 reactive breaker is declared obsolete and out of scope. It also records three orchestrator
+defaults as **[ASSUMED, pending human confirmation in ADR review]**. These are not rulings
+(Q6, Q7, Q10 → AS-1..AS-3). Finally, it adds the #1944 2026-10-02T23:06:30Z addendum to the
+Prometheus/Grafana traceability.
 **Date:** 2026-10-02
 **Author:** pm-agent
 **Source issues:** #1944 (open, `priority:critical`, v0.6.1. Its body is authoritative, and its
 2026-10-02 "Design decisions ruled today" section governs wherever it conflicts with older material);
 #1446 (closed; comments 2026-08-17T05:17:05Z, 05:25:22Z, 07:47:00Z); PR #1450 (merged; comments
 2026-08-17T07:46:46Z through 2026-08-18T04:20:43Z, including ScottThurlow's 08:08:39Z rejection);
-human directive, interactive session 2026-10-02 (Prometheus and Grafana scope).
+human directive, interactive session 2026-10-02 (Prometheus and Grafana scope); human ruling,
+interactive session 2026-10-02 (Amendment 1: poll location, `>=`, status-file format, reactive
+breaker obsolete); #1944 addendum comment 2026-10-02T23:06:30Z (dashboard/exporter data shape,
+relayed by the orchestrating session; this pass did not re-read it).
 **Target:** pm-agent (this document) → `architect` → `technical-design` → implementation, run through
 human-driven interactive worker sessions (#1944 "Process note"), with the overseer reviewing the PR(s).
 **Consumers:** `architect` (next), then `technical-design`, `unit-test`, `system-test`.
@@ -39,9 +48,10 @@ currently disabled.** `bin/hos-cron:2090-2155`. The #1446 usage-limit breaker bl
 greps the session's *own* transcript, trips on the first match, and needs a manual
 `hos-suspend --clear`, so *"documenting the breaker can trip the breaker."* Only its auto-close
 half (`:2181-2202`) is still live. **Consequence:** right now no usage protection of any kind is
-active on this host. Once this issue ships, the proactive check will be the only live protection,
-not a check with a backstop behind it. This document does not resolve the conflict. FR-40 keeps
-the block byte-for-byte unchanged, and whether to re-enable it is escalated to the human (§8, C-1).
+active on this host. **Resolved by Amendment 1:** the human ruled the #1450 reactive breaker
+design **obsolete and out of scope** for #1944 (human ruling, interactive session 2026-10-02). The
+proactive check *is* the protection. #1944 does not re-enable it, rely on it, or depend on it as a
+backstop (FR-40, C-1).
 
 **VF-2: The 09-01 false-positive lesson applies directly.** Any pause signal taken from free text
 that an agent session might also print will trip on that text. The proactive check must read only
@@ -52,7 +62,9 @@ its own `/usage` invocation's output (FR-28).
 `--until` takes only `YYYY-MM-DD`. `bin/hos-cron:263-283` checks the marker **before** any role work
 and exits 0. Two consequences. (i) If the proactive pause reuses this marker and the poll runs
 inside `hos-cron` after this check, the poll never runs while paused and auto-resume is impossible
-(a deadlock; FR-24). (ii) The marker has no field recording *who* set it, so an automatic resume
+(a deadlock; FR-24). *Amendment 1:* the standalone poller (FR-50) is not gated by `hos-suspend`,
+so the poll itself cannot deadlock. How the cycle-start check's pause relates to the marker is
+still the architect's call (Q16). (ii) The marker has no field recording *who* set it, so an automatic resume
 that clears it could also wipe a human's or the timeout breaker's suspension (FR-25).
 
 **VF-4: The suggested settings location is a repo-committed, per-repo file, and `hos-cron` does not
@@ -163,10 +175,14 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   AD-16 (VF-6, Q8, Q18).
 - **FR-15:** Every successful reading records how it was parsed (`parsed_via`: grep or fallback).
 - **FR-16:** Per-model weekly values (e.g. `Current week (Fable)`) are captured when present and
-  recorded as absent when not present. Whether they also feed the pause decision is open (Q6).
+  recorded as absent when not present. **[ASSUMED, pending human confirmation in ADR review]**
+  (AS-1): they are exported as gauges only and do **not** feed the pause decision.
 - **FR-17: Local-session breakdown fields** ("Approximate, based on local sessions on this
   machine": subagent-breakdown %, >150k-context %, 8h+-session %) are parsed when present (human
-  directive, interactive session 2026-10-02). **These fields never affect the pause decision.** A
+  directive, interactive session 2026-10-02). The #1944 2026-10-02T23:06:30Z addendum confirms two
+  things. The section includes a **"top subagents" list**. Its figures are **rolling 24h/7d windows
+  computed by Claude Code**, so they are exported as reported and not windowed or re-aggregated by
+  HOS (FR-43). **These fields never affect the pause decision.** A
   missing, unparseable, or format-changed breakdown field must not turn a successful read into a
   failed one. A missing field is recorded as **absent, never 0** (FR-44). Their parser cannot be
   specified until D-1 is met.
@@ -177,9 +193,10 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   for the weekly window**. These defaults **supersede** the 85%/90% in the 2026-08-17 final ruling
   (PR #1450 08:05:21Z and ScottThurlow 08:08:39Z). They also supersede the 90%/95% in the 07:46:46Z
   and 07:47:00Z correction comments (#1944 10-02).
-- **FR-19:** Pause when **either** window's reading is **at or above** its threshold (ScottThurlow
-  08:08:39Z: *"If we exceed either threshold, we pause"*; 07:46:46Z: *"Suspend at 90%"*).
-  "At or above" is a clarifying precision on the "at 90%" wording.
+- **FR-19:** Pause when `session_pct >= session_threshold` **OR**
+  `weekly_all_pct >= weekly_threshold` (both default 90). The comparison is **`>=`**, not `>`.
+  Reaching the threshold pauses (human ruling, interactive session 2026-10-02, which confirms
+  ScottThurlow 08:08:39Z *"either threshold"* and 07:46:46Z *"Suspend at 90%"*).
 - **FR-20:** "Session window" means whatever window `/usage` reports as `Current session`. Its
   length (variously called 2h or 5h in the sources) must not be hard-coded or assumed.
 - **FR-21:** Fail mode is configurable, default **fail-closed**. Under fail-closed, each of the
@@ -189,8 +206,11 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   misfires, the operator response is to flip the setting, not change the default.
 - **FR-22 [DERIVED]:** Under fail-open, a failed read does not cause a pause. It is still recorded as
   a failure in the status file and in the health gauges, so a broken check is never invisible
-  (#1446 05:25:22Z: *"the check is broken" is distinguishable*).
-- **FR-23: Auto-resume.** When a later successful read shows both windows below threshold, cron work
+  (#1446 05:25:22Z: *"the check is broken" is distinguishable*). **[ASSUMED, pending human
+  confirmation in ADR review]** (AS-3): after N consecutive failed polls in fail-open mode (N
+  configurable), one deduped `needs-human` issue is filed.
+- **FR-23: Auto-resume.** When a later successful read shows both windows strictly below threshold
+  (`<`, the complement of FR-19), cron work
   resumes with no human action (08:05:21Z; #1944). ScottThurlow's 08:08:39Z wording, *"pause until
   the offending window resets"*, is **recorded alongside and has the same effect**. Usage within a
   window only rises, so a reading drops below threshold only when the offending window resets. The
@@ -199,12 +219,19 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   the read-driven rule applies the new threshold at the next read. This is a clarifying
   reconciliation, recorded in §8.
 - **FR-24 [DERIVED]: The pause must not stop the poll.** The poll keeps running and writing status
-  while cron work is paused. Otherwise FR-23 can never happen (VF-3 deadlock).
+  while cron work is paused. Otherwise FR-23 can never happen (VF-3 deadlock). *Amendment 1:* the
+  standalone poller (FR-50) satisfies this structurally. The requirement stays as a constraint the
+  design must not regress, for example by making the poller check a suspend marker.
 - **FR-25 [DERIVED]: Auto-resume lifts only the pause this mechanism set.** It must never clear a
   human `hos-suspend`, a timeout-breaker suspension, or a reactive-breaker suspension. This
   preserves existing `hos-suspend` behavior (VF-3).
 - **FR-26:** The check gates **every worker and overseer cron cycle before any Claude session starts**
-  in that cycle (#1944 title and Goal: pause *before* the hard limit).
+  in that cycle (#1944 title and Goal: pause *before* the hard limit). *Amendment 1:* `bin/hos-cron`
+  (worker and overseer roles) does this with a **cycle-start check that reads the latest status-file
+  reading** and decides whether to suspend (human ruling, interactive session 2026-10-02). It does
+  not call `/usage` itself. **[ASSUMED, pending human confirmation in ADR review]** (AS-2): a cycle
+  already running when a poll reaches threshold is allowed to finish, bounded by
+  `HOS_CRON_MAX_SECONDS`. There is no mid-cycle kill.
 - **FR-27:** The settings and the quota reading are machine-level, so every HOS project's worker and
   overseer on the host follows the same thresholds and the same reading (#1944 10-02: *"the
   underlying subscription quota is shared across whatever projects run on this box"*).
@@ -225,7 +252,10 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
 - **FR-31:** One fixed-path status file **per role/project** (as ruled in #1446 05:25:22Z and #1944
   10-02; see Q5 on how this fits with poll location). It is overwritten **in full** on every run,
   mirroring `sync_human_clone.sh` `write_status()` (#1276, VF-7), including the crash-still-writes
-  behavior.
+  behavior. *Amendment 1:* the human reconfirmed this format unchanged (human ruling, interactive
+  session 2026-10-02). In that session the human called it the "log file" and the cycle check
+  reading "the last log entry". **The "last entry" is the whole overwrite-in-place file.** That
+  wording does not authorize an appending log, and there is no earlier entry to read.
 - **FR-32:** A run that cannot produce a usable reading still overwrites the status file with that
   failure state and a reason. So "the check is broken" (failure record), "the check hasn't run since
   boot" (no file), and "the check is healthy" (success record) are all distinguishable.
@@ -253,16 +283,40 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   pause.
 - **FR-38:** On auto-resume, the open proactive-pause issue is auto-closed with a comment. #1450's
   pattern includes auto-close on recovery (#1944 Reference; `bin/hos-cron:2181-2202`).
-- **FR-39:** The issue says why the pause happened: which window crossed which threshold at what
-  reading, or that the check failed or went stale (with the failure reason) under fail-closed.
+- **FR-39:** The issue says why the pause happened: which window's reading was `>=` which
+  threshold, and the reading, or that the check failed or went stale (with the failure reason) under fail-closed.
 
-### G. Reactive backstop
+### G. Reactive breaker (obsolete, out of scope; Amendment 1)
 
-- **FR-40:** #1450's reactive breaker code in `bin/hos-cron` is left **unchanged**, including its
-  current commented-out state (`:2090-2155`) and its live auto-close half (`:2181-2202`). This issue
-  adds the proactive check alongside it and does not replace it (08:08:39Z: *"If hard limit hit,
-  pause too"*; #1944). Re-enabling the breaker is **out of scope** for this build and escalated to
-  the human (C-1).
+- **FR-40:** The #1450 reactive breaker design (commented out at `bin/hos-cron:2090` since
+  2026-09-01) is **obsolete and out of scope** for #1944 (human ruling, interactive session
+  2026-10-02; this supersedes 08:08:39Z *"If hard limit hit, pause too"* and #1944's "keep as
+  backstop"). #1944 does not re-enable it, rely on it, or depend on it as a backstop. **The
+  proactive check is the protection.** #1944 makes no change to that code, commented or live.
+  Whether to delete it is not this issue's concern.
+
+### L. Poll placement (Amendment 1)
+
+- **FR-50:** The poll is a **separate, standalone cron job** that runs at the poll interval (default
+  every 5 minutes, FR-8). It reads usage over SSH loopback (FR-3) and writes the status file
+  (FR-31). It is **not** inside `bin/hos-cron` and is not gated by `hos-suspend` (human ruling,
+  interactive session 2026-10-02). `bin/hos-cron` only consumes the status file (FR-26, FR-36).
+  The standalone job must still meet FR-6 (no cron-`PATH` dependence) and FR-34 (its crontab entry
+  must not add an appending log).
+
+### M. Orchestrator-assumed defaults (NOT human rulings)
+
+Each item below is **[ASSUMED, pending human confirmation in ADR review]**. The orchestrating
+session adopted them so design can proceed. The human did not rule on them, and they must not be
+cited as rulings.
+
+- **AS-1 (Q6):** Only the current-session and all-models weekly windows trigger a pause. Per-model
+  weekly values (e.g. Fable) are exported as gauges only.
+- **AS-2 (Q7):** The check runs at cycle start. A cycle already running finishes, bounded by
+  `HOS_CRON_MAX_SECONDS`. There is no mid-cycle kill.
+- **AS-3 (Q10):** In fail-open mode, a check that keeps failing still files **one** deduped
+  `needs-human` issue after N consecutive failed polls (N configurable; the default is the
+  architect's to propose).
 
 ### H. Prometheus export (human directive, interactive session 2026-10-02)
 
@@ -312,7 +366,9 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
 
 - **D-1: A real captured `/usage` sample containing the local-sessions breakdown section** is
   needed before the parser for subagent / >150k-context / 8h+-session can be specified. None of the
-  sources captured it, and `usage-parse.sh` parses only the session and weekly lines. This does
+  sources captured it, and `usage-parse.sh` parses only the session and weekly lines. The #1944
+  2026-10-02T23:06:30Z addendum confirms part of the shape (a "top subagents" list; rolling 24h/7d
+  figures computed by Claude Code), but that is not a verbatim sample, so D-1 still stands. This does
   **not** block the threshold decision (FR-17). The sample should also show whether percentages
   can exceed 100 once credits are in use, so the parser does not clamp or reject them.
 - **D-2: Haiku fallback end-to-end verification** outside the #1370 constraint (FR-14 / AC-21).
@@ -360,8 +416,8 @@ Every criterion applies to both the worker and overseer roles.
   read path never sources `claude-auth.env`.
 - **AC-16:** On a host with the loopback set up, a real unattended cron-context read without a pty
   gives a SUCCESSFUL read (a manual, recorded run is acceptable).
-- **AC-17:** `bin/hos-cron`'s reactive-breaker block (`:2090-2155`) and its auto-close block
-  (`:2181-2202`) are byte-identical before and after the change.
+- **AC-17:** #1944 makes no change to the obsolete #1450 reactive-breaker code (`bin/hos-cron`
+  `:2090-2155` and `:2181-2202`). No #1944 requirement or test depends on that code being active.
 - **AC-18:** A fixture with no breakdown section → a SUCCESSFUL read with an unchanged decision, and
   the breakdown gauges are absent (not 0). After D-1, a fixture with the breakdown section → those
   gauges are present with the raw values.
@@ -383,12 +439,22 @@ Every criterion applies to both the worker and overseer roles.
 - **AC-25:** A primary-path read reports `$0.0000` / `0 input, 0 output`, meaning no model call.
 - **AC-26:** The existing suite (`scripts/framework/run_tests_inner_loop.sh`) passes, including
   T4.1 once Q8 is resolved.
+- **AC-27 (Amendment 1, FR-50):** The `/usage` read happens only in the standalone poller.
+  `bin/hos-cron` runs no `/usage` call and no SSH loopback, and decides only from the status file.
+  With a project suspended, the poller still runs on schedule and overwrites the status file.
+- **AC-28 (Amendment 1, FR-19 `>=`):** `session=90, weekly=0` → pause. `session=0, weekly=90` →
+  pause. `session=89, weekly=89` → no pause. A test that treats exactly 90 as "not reached" fails.
+- **AC-29 [ASSUMED, AS-2]:** A cycle already running when the status file flips to over-threshold
+  is not killed by this feature. The next cycle start is gated.
+- **AC-30 [ASSUMED, AS-3]:** Fail-open mode with N consecutive failed polls → exactly one open
+  `needs-human` issue. N-1 failures → none. One success resets the count.
 
 ---
 
 ## 5. Explicit non-goals
 
-- Re-enabling, rewriting, or re-scoping #1450's reactive breaker (C-1 is for the human).
+- Anything involving the obsolete #1450 reactive breaker: re-enabling, rewriting, deleting, or
+  relying on it as a backstop (human ruling, interactive session 2026-10-02).
 - Pausing interactive or human-proxy sessions. The purpose is to leave headroom *for* them.
 - A cron-specific `/usage`-capable token, or any re-storing of the personal credential (rejected
   under #1359).
@@ -401,8 +467,10 @@ Every criterion applies to both the worker and overseer roles.
 ## 6. Open questions for the architect
 
 From #1944 (carried over unchanged):
-- **Q1: Where does the poll run?** Inside `bin/hos-cron`, or as a standalone timer or script? It must
-  satisfy FR-24 (the poll survives a pause) and FR-34 (no new appending log).
+- **Q1: RESOLVED (human ruling, interactive session 2026-10-02).** A separate standalone cron job
+  every 5 minutes does the read and writes the status file. `bin/hos-cron` gains a cycle-start
+  check that reads it (FR-50, FR-26). The architect still owns the poller's crontab and
+  PATH handling (FR-6, FR-34).
 - **Q2: SSH-loopback setup runbook plus the idempotent preflight check (FR-47/48).**
 - **Q3: Exact settings location** (FR-29). VF-4 is input: `machine-accounts.env` is a repo file that
   `hos-cron` does not read, while `~/.config/hos/` is the machine-level directory `hos-cron` does
@@ -412,21 +480,23 @@ From #1944 (carried over unchanged):
 
 **NEW from this pass:**
 - **Q5 (NEW):** How the ruled per-role/project status file (FR-31) fits a machine-level quota and
-  settings. If Q1 picks a single machine-level poller, how is "one fixed path per role/project"
-  satisfied without per-consumer history or N redundant polls? The ruling is not reopened here. The
+  settings. *Sharpened by Amendment 1:* with Q1 resolved to one standalone poller, how is "one
+  fixed path per role/project" satisfied without per-consumer history or N redundant polls? (For
+  example: one poller writing one file per role/project, or a single machine-scoped file, which
+  would need human sign-off as a change to the ruling.) The ruling is not reopened here. The
   architect must show how the chosen design complies with it, or bring a conflict back to the human.
-- **Q6 (NEW):** Do per-model weekly windows (e.g. Fable) feed the pause decision, or only the
-  all-models weekly? The sources say only "weekly window". **Escalate to the human.** The PM will not
-  infer this.
-- **Q7 (NEW):** What happens to a Claude session already **running** when a poll crosses threshold?
-  Is it left to finish, or interrupted? The sources only rule on gating before a cycle (FR-26).
-  **Escalate to the human.**
+- **Q6: ASSUMED (AS-1), pending human confirmation in ADR review.** Only session and all-models
+  weekly trigger a pause. Per-model weekly is gauges-only. This is not a human ruling.
+- **Q7: ASSUMED (AS-2), pending human confirmation in ADR review.** Check at cycle start only. A
+  running cycle finishes, bounded by `HOS_CRON_MAX_SECONDS`. No mid-cycle kill. This is not a human
+  ruling.
 - **Q8 (NEW):** How the `claude -p "/usage"` call site fits with ADR-1643 AD-16 / T4.1 (VF-6). Is it
   a named exemption, routed through `invoke_agent.sh`, or something else? The same question applies
   to the Haiku fallback.
 - **Q9 (NEW):** The default time bound for the `/usage` read (FR-7), and whether it is configurable.
-- **Q10 (NEW):** Under fail-open, should a persistent check failure still file a `needs-human`
-  issue? The sources rule on visibility for a *pause* only. **Escalate to the human.**
+- **Q10: ASSUMED (AS-3), pending human confirmation in ADR review.** In fail-open mode, one deduped
+  `needs-human` issue is filed after N (configurable) consecutive failed polls. The architect
+  proposes the N default. This is not a human ruling.
 - **Q11 (NEW):** What happens with invalid settings (FR-30), e.g. a threshold above 100 or below 0,
   a non-numeric value, a staleness window ≤ the poll interval, or an unknown fail mode. Fail closed
   plus loud error is the conservative reading. **Escalate to the human** for the rule.
@@ -439,8 +509,11 @@ From #1944 (carried over unchanged):
   `MACHINE-ACCOUNTS-SETUP.md` (VF-5).
 - **Q15 (NEW):** One machine-wide trip with FR-37 applied per project files one issue per project
   repo. Is that the intended visibility, or should there be a single machine-scoped issue?
-- **Q16 (NEW):** Should the pause reuse the `hos-suspend` marker? If so, how are FR-24 and FR-25
-  satisfied given that it is project-keyed and role-blind and has no owner field (VF-3)?
+- **Q16 (NEW, narrowed by Amendment 1):** The poll-deadlock half is dissolved, because the
+  standalone poller is not gated by `hos-suspend`. Still open for the architect: does the
+  cycle-start check's pause reuse the `hos-suspend` marker, and if so, how is FR-25 satisfied
+  (auto-resume must never clear a human or timeout-breaker suspension) given that the marker is
+  project-keyed and role-blind and has no owner field (VF-3)?
 - **Q17 (NEW):** Is a single audit event per pause/resume transition wanted? Per-poll events are
   ruled out (FR-34).
 - **Q18 (NEW):** If the Haiku fallback is ever verified, which credential and quota does it run
@@ -465,35 +538,37 @@ From #1944 (carried over unchanged):
 | FR-12, FR-13 | PR #1450 07:48:32Z Test 1; #1944 History; #1944 Related (#1362/#1369) |
 | FR-14 | #1944 Reference; #1446 05:17:05Z |
 | FR-15 | #1446 05:17:05Z (`parsed_via`); #1446 05:25:22Z (status contents) |
-| FR-16 | #1446 05:17:05Z (Fable optional, null when absent) |
-| FR-17 | Human directive, interactive session 2026-10-02 |
+| FR-16 | #1446 05:17:05Z (Fable optional, null when absent); decision role [ASSUMED] AS-1 |
+| FR-17 | Human directive, interactive session 2026-10-02; #1944 addendum 2026-10-02T23:06:30Z ("top subagents" list; rolling 24h/7d windows computed by Claude Code) |
 | FR-18 | #1944 10-02 "Thresholds" (supersedes PR #1450 08:05:21Z, ScottThurlow 08:08:39Z, 07:46:46Z, #1446 07:47:00Z) |
-| FR-19 | ScottThurlow 08:08:39Z ("either"); PR #1450 07:46:46Z ("at 90%") |
+| FR-19 | **human ruling, interactive session 2026-10-02** (`>=`); ScottThurlow 08:08:39Z ("either"); PR #1450 07:46:46Z ("at 90%") |
 | FR-20 | #1944 ("2h"); ScottThurlow 08:08:39Z ("2 hour"); human directive 2026-10-02 ("2h/5h") |
 | FR-21 | #1944 10-02 "Fail-open/fail-closed" + "consumption contract"; PR #1450 08:05:21Z; overseer 08:37:00Z |
-| FR-22 | [DERIVED] #1446 05:25:22Z |
+| FR-22 | [DERIVED] #1446 05:25:22Z; issue-filing part [ASSUMED] AS-3 |
 | FR-23 | PR #1450 08:05:21Z; #1944 History; ScottThurlow 08:08:39Z ("until the offending window resets", recorded as equivalent) |
-| FR-24, FR-25 | [DERIVED] FR-23 + VF-3 (`bin/hos-suspend`, `bin/hos-cron:263-283`) |
-| FR-26 | #1944 title + Goal |
+| FR-24, FR-25 | [DERIVED] FR-23 + VF-3 (`bin/hos-suspend`, `bin/hos-cron:263-283`); FR-24 satisfied for the poll by human ruling, interactive session 2026-10-02 (standalone poller) |
+| FR-26 | #1944 title + Goal; human ruling, interactive session 2026-10-02 (cycle-start check reads status file); in-flight behavior [ASSUMED] AS-2 |
 | FR-27 | #1944 10-02 "Thresholds" (shared-quota rationale) |
 | FR-28 | `bin/hos-cron:2090-2107` (operator disable 2026-09-01) |
 | FR-29 | #1944 10-02 "Thresholds" (machine-level; supersedes 08:08:39Z "project config"); #1944 Q3 |
 | FR-30 | [DERIVED] FR-21 intent + #1362/#1369 class |
-| FR-31, FR-32 | #1446 05:25:22Z; #1944 10-02 "Status file"; `sync_human_clone.sh:120-133` |
+| FR-31, FR-32 | #1446 05:25:22Z; #1944 10-02 "Status file"; `sync_human_clone.sh:120-133`; human ruling, interactive session 2026-10-02 (format reconfirmed; "last log entry" = whole overwrite-in-place file) |
 | FR-33 | #1446 05:25:22Z (percentages, `parsed_via`, timestamp, breaker state) |
 | FR-34, FR-35 | #1446 05:25:22Z; ScottThurlow 08:08:39Z; #1944 10-02 |
 | FR-36 | #1944 10-02 "consumption contract" + "Poll interval" |
 | FR-37, FR-39 | #1944 10-02 "Visibility on trip"; `bin/hos-cron:2056-2080, 2132-2154` |
 | FR-38 | #1944 Reference ("auto-close on recovery"); `bin/hos-cron:2181-2202` |
-| FR-40 | ScottThurlow 08:08:39Z; PR #1450 07:46:46Z; #1944 10-02 + Reference; VF-1 |
-| FR-41 | #1944 10-02 "Dashboarding"; human directive 2026-10-02 |
-| FR-42, FR-43, FR-44 | Human directive, interactive session 2026-10-02 |
+| FR-40 | **human ruling, interactive session 2026-10-02** (reactive breaker obsolete, out of scope; supersedes ScottThurlow 08:08:39Z "if hard limit hit, pause too" and #1944 "keep as backstop"); VF-1 |
+| FR-41 | #1944 10-02 "Dashboarding"; human directive 2026-10-02; #1944 addendum 2026-10-02T23:06:30Z |
+| FR-42, FR-43, FR-44 | Human directive, interactive session 2026-10-02; #1944 addendum 2026-10-02T23:06:30Z (breakdown data shape) |
 | FR-45 | #1944 10-02 "Dashboarding" + FR-34 |
-| FR-46 | Human directive, interactive session 2026-10-02 |
+| FR-46 | Human directive, interactive session 2026-10-02; #1944 addendum 2026-10-02T23:06:30Z |
 | FR-47 | #1944 Q2 |
 | FR-48 | #1944 Q2 ("idempotent check … rather than assuming") |
 | FR-49 | #1944 Process note; overseer PR #1450 08:37:00Z |
-| D-1 | Human directive 2026-10-02 (NOTE on breakdown format) |
+| FR-50 | **human ruling, interactive session 2026-10-02** (Q1: standalone 5-min cron poller; hos-cron checks only) |
+| AS-1, AS-2, AS-3 | **[ASSUMED, pending human confirmation in ADR review]**, adopted by the orchestrating session; NOT human rulings |
+| D-1 | Human directive 2026-10-02 (NOTE on breakdown format); #1944 addendum 2026-10-02T23:06:30Z (partial shape confirmation, verbatim sample still required) |
 | D-2 | #1944 Reference; #1446 05:17:05Z |
 | D-3 | #1944 10-02 "Dashboarding" + Q4 |
 
@@ -509,19 +584,31 @@ From #1944 (carried over unchanged):
   rule is the operative one (FR-23). Clarifying.
 - **S-4, the credential question:** "did not work" (ScottThurlow 2026-08-18T04:20:43Z) and the
   retracted success report (07:57:29Z) → **closed by #1944 10-02 SSH loopback**. Not reopened.
-- **C-1, CONFLICT, escalated:** #1944 says "keep #1450's reactive breaker as-is" as a hard-limit
-  backstop, but at HEAD that breaker is **disabled** (operator, 2026-09-01; VF-1). FR-40 keeps it
-  unchanged, so no ruling is overridden. **The human must decide** whether a scoped re-enable is
-  wanted as a separate issue. Until then, the proactive check (with fail-closed) is the only live
-  protection.
+- **C-1, RESOLVED by human ruling, interactive session 2026-10-02:** #1944 said "keep #1450's reactive breaker as-is" as a hard-limit
+  backstop, but at HEAD that breaker was already **disabled** (operator, 2026-09-01; VF-1). The
+  human has now ruled the #1450 reactive breaker design **obsolete and out of scope** for #1944.
+  #1944 does not re-enable it, rely on it, or depend on it. The proactive check is the protection.
+  #1944 makes no change to that code (FR-40, AC-17). This supersedes ScottThurlow 08:08:39Z
+  *"If hard limit hit, pause too"* and the #1944 body's "keep as backstop".
 - **C-2, settings location:** #1944's suggested `machine-accounts.env` is not machine-level in
   practice (VF-4). Recorded as input to Q3, not resolved.
 - **C-3, runbook location:** #1944 "likely `MACHINE-ACCOUNTS-SETUP.md`" vs the #728 runbook actually
   being `CRON-SETUP.md` (VF-5). Input to Q14.
 - **C-4, governance:** The ruled raw `claude -p "/usage"` vs the AD-16 / T4.1 single-invocation-site
   rule (VF-6). Q8.
-- **C-5, scoping tension:** status file per role/project (ruled) vs machine-level quota and settings
-  (ruled). Not a contradiction, but the design has to satisfy both. Q5.
+- **C-5, scoping tension (sharpened):** status file per role/project (ruled) vs machine-level quota
+  and settings (ruled), now with a single standalone poller (Q1 resolved). Not a contradiction, but
+  the design has to satisfy both. Q5.
+- **S-5, poll location:** #1446 05:17:05Z argued for building inside `bin/hos-cron`, and #1944 Q1
+  left it open → **human ruling, interactive session 2026-10-02: a standalone cron poller, with `bin/hos-cron` reading only the status
+  file** (FR-50).
+- **S-6, comparison operator:** "crosses" / "exceed" (08:08:39Z) / "at 90%" (07:46:46Z) → **human ruling, interactive session 2026-10-02:
+  `>=`** (FR-19).
+- **S-7, "log file" wording:** in the interactive session the human said "log file / last log
+  entry". Recorded as the same ruled overwrite-in-place status file, not an appending log (FR-31).
+- **A-1, assumed defaults:** AS-1 (Q6), AS-2 (Q7), and AS-3 (Q10) were adopted by the
+  orchestrating session and are **not** human rulings. They are marked [ASSUMED, pending human
+  confirmation in ADR review] everywhere they appear.
 
 ---
 
@@ -534,17 +621,18 @@ CONFIDENCE: 80%. High confidence in the ruled items and in VF-1/VF-3/VF-6, all g
 Lower confidence in the breakdown-section format (D-1) and in the host's exporter setup (Q4). Neither
 could be observed from this session.
 
-Classification: **additive** for FR-1 to FR-21, FR-23, FR-26 to FR-29, and FR-31 to FR-49. These
-write down behavior already ruled in the cited sources. **Structural / needs human confirmation:**
-FR-22, FR-24, FR-25, and FR-30 ([DERIVED]), plus the escalated questions Q6, Q7, Q10, Q11, and C-1.
+Classification: **additive** for FR-1 to FR-21, FR-23, FR-26 to FR-29, FR-31 to FR-49, and FR-50
+(ruled in Amendment 1). These write down behavior already ruled in the cited sources. FR-40's change
+to "obsolete" is a human-ruled structural change, already signed off in the interactive session.
+**Structural / needs human confirmation:** FR-22, FR-24, FR-25, and FR-30 ([DERIVED]); AS-1, AS-2,
+and AS-3 ([ASSUMED]); and Q11.
 
 ## Human Review Required
 
-1. **C-1:** The reactive backstop is disabled at HEAD. Confirm that the proactive check alone is
-   acceptable for now, and say whether you want a separate scoped re-enable issue.
+1. **C-1:** Resolved (reactive breaker obsolete). Nothing further needed.
 2. **[DERIVED] FR-22, FR-24, FR-25, FR-30:** Confirm these. They follow from the rulings but are not
    stated in them.
-3. **Q6, Q7, Q10, Q11:** Product rulings needed. Per-model weekly thresholds, in-flight session
-   behavior, fail-open visibility, and invalid-settings behavior.
+3. **AS-1 / AS-2 / AS-3 (Q6, Q7, Q10):** Confirm or override the orchestrator-assumed defaults
+   in ADR review. **Q11** (invalid-settings behavior) still needs a product ruling.
 4. **D-1:** Provide a real `/usage` capture that includes the "Approximate, based on local sessions
    on this machine" breakdown section.
