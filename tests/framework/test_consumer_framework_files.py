@@ -145,3 +145,9 @@ def test_ship_list_holds_registry_data_and_withholds_generated_and_sweep():
         "scripts/framework/run_post_change_sweep.sh",
     ):
         assert withheld not in listed, f"{withheld} must not be on the ship-list"
+
+
+def test_usage_pause_files_shipped():
+    """#1944: the poller and its library ship to consumer installs."""
+    files = set(_consumer_files())
+    assert {"bin/hos-usage-poll", "bin/lib/usage_pause.py"} <= files

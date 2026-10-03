@@ -71,6 +71,165 @@ logs a clear "refresh the token" hint; re-run `claude setup-token`.
 
 ---
 
+## 2a. Usage-pause poller (SSH loopback)
+
+Setup for the proactive usage pause (#1944). One poller per host. The cycle-start
+gate that consumes its reading ships in a later step; until it is installed, this
+poller only records readings. Later steps add sections 2a.0, 2a.8 and 2a.11 and
+`--check` item 9; they are absent here, so the numbering has gaps. Work through
+2a.1a to 2a.7 in order: `--check` ends `RESULT: FAIL` until every step is done, and
+that is expected part-way through.
+
+### 2a.1 What it is
+
+One poller per host runs every 5 minutes. It reads `/usage` under your **personal
+login** over SSH loopback and never touches `claude-auth.env`. Every worker and
+overseer cycle on the host (all projects, both roles) pauses at cycle start when
+**session, weekly (all models), or any weekly per-model** usage is `>=` its
+threshold (default 90 each), or when the reading is missing, stale or failed
+(fail-closed). It resumes on its own. Interactive sessions are never paused. This
+is separate from `hos-suspend`.
+
+### 2a.1a State directory (do this before anything else)
+
+The crontab redirect in 2a.6 writes `poll.last.log` into this directory, and the
+shell fails before the poller starts if it does not exist. Create it first
+(block 1 of `--print-setup`):
+
+```bash
+mkdir -p ~/.hos/usage-pause && chmod 700 ~/.hos/usage-pause
+```
+
+Leave `HOS_STATE_DIR` unset in the crontab environment. If you must set it, the
+redirect's parent directory has to be the same `$HOS_STATE_DIR/usage-pause`, and the
+`hos-cron` crontab lines must carry the same value; otherwise the gate looks in a
+different place from the poller. `--check` item 12 verifies the directory (and
+honours `HOS_STATE_DIR` when it is set in your shell).
+
+### 2a.2 Key
+
+Generate the loopback key (block 2 of `bin/hos-usage-poll --print-setup`):
+
+```bash
+ssh-keygen -t ed25519 -N '' -C hos-loopback -f ~/.ssh/hos_loopback
+```
+
+### 2a.3 authorized_keys
+
+Append the one line printed by `bin/hos-usage-poll --print-setup` (block 3) to
+`~/.ssh/authorized_keys`. It has exactly seven options: `from=`, `command=` and the
+five flags `no-port-forwarding`, `no-agent-forwarding`, `no-X11-forwarding`, `no-pty`
+and `no-user-rc`, each once, in any order:
+
+```text
+from="127.0.0.1,::1",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty,no-user-rc,command="<abs timeout> -k 5 <R> <abs claude> -p /usage --output-format json" ssh-ed25519 <blob> hos-loopback
+```
+
+`<R>` is `read_timeout_seconds - 10`, so the remote side stops before the poller's own
+kill at `read_timeout_seconds`. `<abs timeout>` is the absolute path of `timeout`
+(resolved from `PATH`, or the `timeout_bin` setting). The command text depends on
+`read_timeout_seconds`, `claude_bin` and `timeout_bin`: after changing any of them,
+re-run `--print-setup` block 3 and replace the line (`--check` item 2 FAILs until you do).
+
+The line is **not final until a real `--check` read returns real percentages**.
+If `claude` or `timeout` moves, regenerate the line (`bin/hos-usage-poll remote-cmd`);
+`--check` item 2 detects the drift. Do not add `restrict` and do not add environment
+unsetting: both were ruled fragile.
+
+### 2a.4 known_hosts
+
+Seed it from the on-disk host key (block 4 of `--print-setup`). Do not use
+`ssh-keyscan` and do not accept-new.
+
+### 2a.5 Settings (optional)
+
+`~/.config/hos/usage-pause.conf`, one `key=value` per line, `#` comment lines
+allowed. Pin the binaries explicitly so the `authorized_keys` command cannot change
+with `PATH`:
+
+```text
+timeout_bin=/usr/bin/timeout
+claude_bin=/absolute/path/to/claude
+```
+
+`--print-setup` and `remote-cmd` render whatever is resolved at that moment (the
+setting, else the first match on `PATH`), so check the printed line before installing it. The file is parsed, never sourced. Missing = defaults; any invalid value,
+unknown key or duplicate key (including the history keys) pauses every cycle
+until fixed, regardless of `fail_mode`; the cron log line names the key.
+
+| Key | Default | Valid |
+|---|---|---|
+| `session_threshold` | 90 | integer 1-100 |
+| `weekly_threshold` | 90 | integer 1-100 |
+| `weekly_model_threshold` | 90 | integer 1-100 |
+| `fail_mode` | `closed` | exactly `closed` or `open` |
+| `poll_interval_seconds` | 300 | integer multiple of 60, 60-3600 |
+| `staleness_seconds` | 900 | integer greater than `poll_interval_seconds + read_timeout_seconds + 10`, at most 7200 |
+| `read_timeout_seconds` | 60 | integer 20 to `poll_interval_seconds - 30` |
+| `history_days` | 90 | integer 1-3650 |
+| `history_max_mb` | 100 | integer 1-10240 |
+| `claude_bin` | resolved from `PATH` | absolute path, no `.` or `..` segment, not ending in `/` |
+| `timeout_bin` | resolved from `PATH` | same rules as `claude_bin` |
+
+### 2a.6 Crontab: the one install-path line
+
+```cron
+*/5 * * * *  $HOME/<path-to>/bin/hos-usage-poll > $HOME/.hos/usage-pause/poll.last.log 2>&1
+```
+
+This line is the single place the poller's install path is defined. When the path
+changes (for example, #1276), change this line. Use `>`, not `>>`. One entry per
+host. `--print-setup` prints it with your paths filled in.
+
+### 2a.7 Verify
+
+First run `bin/hos-usage-poll --check --capture-fixture ~/hos-usage-envelope-<YYYYMMDD>.json`
+(keep the file and attach it to #1944), then `bin/hos-usage-poll --check`, which
+must end `RESULT: PASS`. `--check` item 8 checks every scheduled `hos-cron` copy
+for the gate: **item 8 must be green after every upgrade of any project on the
+host.** Item 10 is informational: it shows whether the current read would pause
+under the current settings. A failing item 7 with `ssh_failed` names the earlier item (1 to 3) that likely caused it. Item 11 shows the reading the cron-fired poller has
+actually written (age, outcome, reason, `consecutive_failures`) and FAILs when the
+crontab check passed but there is no reading, or the reading is older than
+`staleness_seconds`. Items 6a and 6b check that `claude` and `timeout` are executable. Item 12 prints first and checks the state directory exists, is writable and is
+mode 0700. `--capture-fixture` refuses a target whose parent directory is not yours
+or is group- or world-writable.
+
+### 2a.9 Fail-open
+
+`fail_mode=open` is safe **only once alerting is live** (`contrib/monitoring/`,
+AC-43 and AC-44 recorded). On faberix it is forbidden until the live-delivery
+record exists. fail_mode=open without a running poller means no quota protection.
+
+### 2a.10 Reading the state
+
+- `cat ~/.hos/usage-pause/reading`: raw values; `poll_*` keys are the poller's own view.
+- `cat ~/.hos/usage-pause/last-raw`: the latest raw output, for parse-failure debugging.
+- `cat ~/.hos/usage-pause/poll.last.log`: the last poll's output.
+
+No GitHub issue is ever filed by this feature.
+
+**Reading the keys.**
+- `consecutive_failures`: failed polls in a row; `0` after a success.
+- `last_success_epoch`: Unix time of the last successful poll; absent means it has never succeeded.
+- `--check` item 11 prints the reading's age, outcome, reason and `consecutive_failures`.
+- If a poll finds another poll holding the lock it exits without changing the reading and writes `another poll holds the lock (pid N, age Ns)` to `poll.last.log`. A lock whose PID is dead, or that is older than the read limit plus 60 s, is reclaimed (`diagnostics=lock_stale_reclaimed`).
+
+**Reason to action.** `reason=` in the reading, and `FAILED reason=` in `--check` item 7:
+
+| Reason | Meaning | What to do |
+|---|---|---|
+| `ssh_failed` | ssh exited 255, or the key file is missing | `--check` items 1 to 3; `cat ~/.hos/usage-pause/last-raw` for the ssh error (host key, key mode, `authorized_keys`) |
+| `timeout` | the read did not finish. `timeout_side=remote` (`remote_exit=124`): the remote `timeout` fired; `remote_exit=137`: the remote `timeout` had to KILL, **or** something else sent SIGKILL (for example the OOM killer), which is ambiguous. `timeout_side=local`: the poller's own kill fired (ssh hung, a slow connect, or the remote wrapper missing; check `--check` item 2). `detail` is free text for humans. The poll log shows `ABORT read timed out ...`; the next poll retries, nothing retries within a poll | run `claude` by hand; check load; raise `read_timeout_seconds` within its bounds (then regenerate the `authorized_keys` line) |
+| `spawn_failed` | `ssh` could not be started | check `ssh` is installed and on the poller's `PATH` |
+| `envelope_invalid` | stdout was not the expected JSON envelope | `cat last-raw`; usually the forced command is missing or wrong: `--check` item 2, regenerate the line |
+| `empty_session` | the read succeeded but showed no usage | the forced command may be running under an API-key or expired login: re-run `claude` login as the key's user |
+| `missing_session` / `missing_weekly` | one of the two required limits was absent | `cat last-raw`: the `/usage` text changed shape |
+| `unparseable` | no recognisable usage text | `cat last-raw`: the `/usage` text changed shape |
+| `crashed` | the poller itself failed; `detail` names the step | read `poll.last.log`; run `python3 bin/lib/usage_pause.py poll-params` by hand |
+
+---
+
 ## 3. Project registry
 
 `bin/hos-cron` resolves each project's repo paths and config dir from a
@@ -78,14 +237,14 @@ machine-local registry. Create `~/.config/hos/projects.conf`:
 
 ```ini
 # <project>_<key>=<value>   — keys: config_dir, worker_root, overseer_root, target_release, max_seconds
-hos_config_dir=/home/scott/Code/HumanOversightSystem/.config/hos
-hos_worker_root=/home/scott/Code/HumanOversightSystem/Worker
-hos_overseer_root=/home/scott/Code/HumanOversightSystem/Overseer
+hos_config_dir=$HOME/Code/<project>/.config/hos
+hos_worker_root=$HOME/Code/<project>/Worker
+hos_overseer_root=$HOME/Code/<project>/Overseer
 hos_target_release=v0.4.2
 
-cps_config_dir=/home/scott/Code/CondoParkShare/.config/hos
-cps_worker_root=/home/scott/Code/CondoParkShare/Worker
-cps_overseer_root=/home/scott/Code/CondoParkShare/Overseer
+cps_config_dir=$HOME/Code/<other-project>/.config/hos
+cps_worker_root=$HOME/Code/<other-project>/Worker
+cps_overseer_root=$HOME/Code/<other-project>/Overseer
 cps_target_release=v1.0.0
 ```
 
