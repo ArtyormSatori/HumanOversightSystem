@@ -833,6 +833,7 @@ Everything else in AD-10 stands: absent-not-zero, raw values only, label hygiene
 
 > Amended by Amendment 4 A4-3 (a required-alert guard test pins the rules that are the human's only signal, plus the contact point's two integrations) and A4-5 (a 13th rule, `HosMonitoringAlertingReloadFailed`).
 > Amended by Amendment 5 A5-7 (D5c): a 14th rule, `HosClaudeUsageReadTimeout`, with a tunable count named value.
+> Superseded in part by Amendment 6 (D17c): the **SMS** integration, its env var, the `.invalid` placeholder, D-5 and the "Worker email + SMS relay" chain are replaced by Grafana's native **Pushover** integration (A6-1, A6-2, A6-7). Email stays. Priority mapping adds a second receiver, `hos-normal` (A6-3, pending H-8).
 
 - **Grafana alerting, not Prometheus rules or Alertmanager.** `prometheus.yml` is untouched: `rule_files` stays commented and the `alertmanager` stanza is left alone. AD-11's `hos-claude-usage.rules.yml` is not shipped. Scrape config: AD-11 (1) stands.
 - **Provisioned files** are all under `contrib/monitoring/grafana/provisioning/`:
@@ -916,6 +917,7 @@ Restated for the TD as a single binding line: **this feature adds no in-flight b
 
 > Amended by Amendment 4 A4-7: S2 coding starts only after the S1 trip test is recorded (H-7).
 > Amended by Amendment 4 A4-2: S4 no longer edits `protected_surfaces.txt`. It is an ordinary MEDIUM slice with no human-merge requirement unless its diff touches `bin/` or another existing protected path.
+> Amended by Amendment 6 A6-6 (D17c): S5's AC-43/AC-44 evidence is **Pushover and email**, with no deferred SMS half. The definition of done is a real pause alert received on Pushover and by email.
 
 | Slice | Contents | Tier | Merge |
 |---|---|---|---|
@@ -1060,6 +1062,7 @@ Each is a human ruling, so the boundary is cleared. A4-3, A4-5 and A4-9 implemen
 ### A4-3: Required-alert guard test in the PR-required suite (human ruling, interactive session 2026-10-03, H-2 replacement control; amends A2-13)
 
 > Amended by Amendment 5 A5-7 (D5c): `hos-read-timeout` joins the required set (anchor `hos_claude_usage_read_timeout`), giving 14 rules and 12 required.
+> Amended by Amendment 6 A6-5 (D17c): assertion 2 checks each rule's receiver per UID (`hos` or `hos-normal`). Assertion 4 now requires Pushover + email on each contact point, with priority floors, and no SMS integration.
 
 - **File:** `tests/framework/test_monitoring_required_alerts.py`.
   - It is collected by `scripts/framework/run_tests_inner_loop.sh`, which `.github/workflows/tests.yml` runs, so it is PR-required.
@@ -1146,6 +1149,8 @@ Each is a human ruling, so the boundary is cleared. A4-3, A4-5 and A4-9 implemen
 
 ### A4-6: AC-44 live test procedure (human ruling, interactive session 2026-10-03, H-4; confirms A2-1)
 
+> Amended by Amendment 6 A6-6 (D17c): step 2 observes the **Pushover notification and the email**. The SMS clause is void.
+
 The AC-44 procedure is confirmed as specified, and it remains S5's definition of done:
 1. Temporarily lower one threshold in `usage-pause.conf` below the current live value of its limit. Equal also trips, since the comparison is `>=`. Never use a value below 1.
 2. Observe the pause and the email (and the SMS once D-5 exists).
@@ -1203,7 +1208,7 @@ The AC-44 procedure is confirmed as specified, and it remains S5's definition of
   - monitrix S5: the `hos-sync` user, clone, sync script, dashboard provider symlink, Grafana env file, sync and reload textfile symlinks, **and install of the reload script plus both units (A4-4)**;
   - the AC-44 run (A4-6);
   - removing the leftover `/tmp/diagnose_claude_usage_tty.sh` crontab entry.
-- **Dependencies, not confirmations:** D-5 (SMS provider) defers only the SMS half of AC-43/AC-44. Q13, Q14 and Q18 are unchanged and not blocking.
+- **Dependencies, not confirmations:** D-5 (SMS provider) defers only the SMS half of AC-43/AC-44. Q13, Q14 and Q18 are unchanged and not blocking. *(Amendment 6: D-5 resolved by D17c, Pushover. H-8 and H-9 are added, and H-6 gains the Pushover setup steps; see A6-9.)*
 
 ### A4-9: Requirements changes for pm-agent (architect does not edit REQUIREMENTS)
 
@@ -1211,7 +1216,7 @@ The AC-44 procedure is confirmed as specified, and it remains S5's definition of
 2. **FR-65 (H-1):** append "The release notes, the upgrade checklist, and the runbook contain the sentence: 'fail_mode=open without a running poller means no quota protection'."
 3. **AC-9 (H-1):** "→ no pause, no GitHub call, **and exactly one `cycle-usage-unchecked` audit event**."
 4. **AC-46 (H-1):** after "With `fail_mode=open`, cycles run" insert ", each writing one `cycle-usage-unchecked` audit event naming the project and cycle_id; the release notes contain 'fail_mode=open without a running poller means no quota protection'".
-5. **AC-47 (H-2):** replace its first sentence with "Every alert in FR-62 exists in `contrib/monitoring/`, is enabled, and routes to the single contact point, which has both an email and an SMS integration. A test in the PR-required suite (`scripts/framework/run_tests_inner_loop.sh`) asserts each required alert by stable rule UID, and asserts both integrations."
+5. **AC-47 (H-2):** replace its first sentence with "Every alert in FR-62 exists in `contrib/monitoring/`, is enabled, and routes to the single contact point, which has both an email and an SMS integration. A test in the PR-required suite (`scripts/framework/run_tests_inner_loop.sh`) asserts each required alert by stable rule UID, and asserts both integrations." *(Superseded by Amendment 6 A6-10 item 10: Pushover and email, not email and SMS.)*
 6. **FR-62 (H-2/H-3):** append to the minimum list "read cost or tokens unknown on a successful read; alerting reload failed on the monitoring host".
 7. **New governance FR, next to FR-49 (H-2):** "`contrib/monitoring/**` is not protected surface. Removing or weakening a required alert is guarded by the required-alert test (AC-47), and is visible to normal PR risk review."
 8. **FR-58 (H-3; corrects a false premise A2-14 already identified):** replace "Grafana reloads provisioned files on its own" with "Grafana reloads provisioned dashboards on its own. Alert-rule and contact-point changes are applied by a root systemd path unit on the monitoring host, which restarts grafana-server when the provisioned alerting files change, with health check and rollback."
@@ -1343,3 +1348,139 @@ Items 1, 2, 5–7, 9–11 and 13 should land before the S1 PR is merged, because
 - **The H-7 trip test and the S1 exit records** have not been posted, so they are unaffected and must be taken on the D5 line. The human's D5a live test is an extra record, not a substitute.
 
 **Self-flag.** RISK: HIGH, unchanged. A5-1 closes a real tunnel exposure. A5-3 adds a remote kill path whose failure mode, a missing `timeout`, is fail-closed. A5-6 and A5-7 are additive observability. CONFIDENCE: HIGH on A5-1 to A5-5 (live-verified on faberix, implemented and tested). MEDIUM-HIGH on A5-7's PromQL until it passes `promtool` (S4 integration test). BLAST RADIUS: `~/.ssh/authorized_keys` on every host (the line must be regenerated), `usage-pause.conf` (new key, tighter bounds; a conf with `read_timeout_seconds` < 20 now pauses under D4), the reading file (+1 key), the metrics contract (+3 families, schema unchanged, additive), and one new alert rule. Change classification: STRUCTURAL (human-ruled), plus one ADDITIVE architect decision (A5-6/A5-7).
+
+---
+
+## Amendment 6 (2026-10-03, human ruling D17c: Pushover for real-time alert notifications)
+
+**Source.** Human ruling, interactive session 2026-10-03, cited "D17c": *"we will use Pushover for the real time notification alerts."* The orchestrating session read it as follows: **Pushover replaces the SMS channel**, which was the never-deployed Twilio relay/webhook placeholder from D17, and **email through the Cloudflare Worker webhook stays as the second channel**. Every alert therefore still reaches two independent channels, as D17's "both channels" requires. **The human confirmed that reading in the same session** (relayed by the orchestrating session). It is recorded here as part of the D17c ruling, not as an interpretation, and it is not on the confirmation list. The ruling is authoritative. Where this amendment conflicts with earlier text, **it governs**. Each superseded section carries an inline pointer, and earlier text is not rewritten.
+
+**Startup-gap check.** No. D17 deliberately left the second channel open (D-5, "no provider chosen"), and S4 has not been built. The only artifacts written against the SMS placeholder are this ADR, the TD (§6.3, §6.4, §6.7, §6.8, §6.9, §7.2, §9.4, §9.4a, §10, §13, Human Review) and REQUIREMENTS (FR-61, FR-63, D-5, AC-43, AC-44, AC-47). All three are design documents, and none carries a code, test or review sign-off for S4/S5. Affected sign-offs are listed in A6-10. No `startup-artifact-gap` issue is warranted.
+
+**Product-boundary check.** D17c is a human ruling, so its consequences are cleared by it: a new third-party service (Pushover, api.pushover.net) on monitrix's egress path; a small one-time cost (Pushover's per-platform device licence after its trial; the API is free at HOS's volume); alert text (instance name, percentages, reason strings; never secrets or URLs) held by a third party; and one more credential pair on monitrix. **Two architect decisions here carry a user-visible consequence and are routed to the human (A6-9):** the second receiver needed for priority mapping (A6-3), which departs from FR-61's "one contact point" wording, and the priority values themselves (A6-4). Both have a stated fallback, and neither blocks S4 coding.
+
+### A6-1: Channels: Pushover + email; SMS removed (D17c; supersedes A2-13's SMS integration, A4-3 assertion 4's `hos-sms-webhook`, and D-5)
+
+- **Pushover** is delivered by Grafana's **native `pushover` integration**. There is no relay, webhook or HOS code between Grafana and the Pushover API.
+- **Email** is unchanged: the `webhook` integration to the Cloudflare Worker, Bearer-authenticated (A2-13, TD §6.4).
+- **SMS is removed.** It is removed entirely, not left as a placeholder: the `hos-sms-webhook` integration, the SMS webhook URL env var, the `.invalid` placeholder URL, and the condoparkshare `sms_relay.py` / Twilio reference. No SMS text remains in `contrib/monitoring/` or the worked-example doc. **D-5 is resolved by D17c**, and "SMS deferred" disappears from AC-43/AC-44 and S5.
+- **Independence (unchanged argument).** Grafana delivers each integration of a contact point independently, so a failing Pushover call does not suppress the email, and vice versa. Both channels still share monitrix, Grafana and monitrix's egress. That is the existing single point of failure (TD §6.8 item 11, "add an external uptime check") and is not new.
+
+### A6-2: Secrets: two Grafana env vars on monitrix, names only in the repo (D17c; extends A2-13's "repo carries only variable names")
+
+- The Pushover **application API token** and the human's **user key** are referenced in the contact-point file only as Grafana provisioning env references, to the variables `HOS_ALERT_PUSHOVER_APP_TOKEN` (for Grafana's Pushover token setting) and `HOS_ALERT_PUSHOVER_USER_KEY` (for its user-key setting). The setting key names are Grafana's (V-P1).
+- Their values exist **only** in Grafana's env file on monitrix (`/etc/default/grafana-server`, 0640 root:grafana), the same place and mechanism as the email webhook secret. The S5 runbook tells the human to add those two variables there, as root, with the values from the Pushover dashboard.
+- **Secret-scan rule for docs and README (the PR #1949 lesson, binding on S4).** No doc, README, test or comment may contain an assignment of the form `<NAME containing TOKEN or KEY>=<anything>`, not even with a placeholder value. The variables are named in prose ("set `HOS_ALERT_PUSHOVER_APP_TOKEN` to the application's API token"). The contact-point YAML holds only the `${…}` references. The S4 PR runs `scripts/oversight/gates/secret_scan.sh` on `hos-contact-point.yaml`, the README and the worked-example doc explicitly, and records the result. If detect-secrets flags a `${…}` reference, the fix is an inline `pragma: allowlist secret` on that YAML line, never a placeholder value.
+- AC-47's "no real endpoints or secrets" test gains no allowlist entry. Docs refer to Pushover's site as the bare domain `pushover.net`, without a scheme, so the `https?://` check is unchanged.
+- **Ordering hazard (binding runbook order).** Grafana validates `apiToken`/`userKey` at provisioning. An empty or unset value can make Grafana refuse to start (V-P2). With no previous alerting files installed, the reload script's rollback on the first run would have nothing to restore. **The env vars are set before the first `systemctl start hos-grafana-alerting-reload.service`.** A later change to the env file alone does not touch a watched file, so the path unit does not fire. The runbook says to restart grafana-server by hand after any env-file change.
+
+### A6-3: Two receivers so that priority follows the alert, not the channel (architect decision; departs from FR-61's "one contact point" wording; human confirmation item H-8)
+
+**Problem.** A Grafana `pushover` integration has **one** `priority` for every notification it sends. The value is a per-integration setting. Treating it as a template is not relied on: whether 13.2.3 accepts a templated priority is unverified, and an integer setting that silently fails to parse would make every alert quiet. One contact point therefore cannot send the pause at high priority and a first-abort warning at normal priority.
+
+**Decision.** There are two contact points, and each has **both** channels:
+
+| Contact point | Integrations (uid → type) | Pushover priority |
+|---|---|---|
+| `hos` (urgent) | `hos-pushover` → `pushover`; `hos-email-webhook` → `webhook` (unchanged) | `hos_pushover_priority_high` |
+| `hos-normal` | `hos-normal-pushover` → `pushover`; `hos-normal-email-webhook` → `webhook` (same Worker URL and secret refs) | `hos_pushover_priority_normal` |
+
+Every alert still reaches two independent channels (D17). Rules keep rule-level `notification_settings.receiver` (A2-13), and no notification-policy tree is provisioned. Integration uids are unique across the file.
+
+**Receiver per rule (binding; TD §6.3 adds the column):**
+- **`hos` (high):** every rule whose firing means a pause is in effect, or that is the human's only signal that the protection or the alarm itself is blind or costing money. These are rule 1 pause-condition, 2 read-failing, 3 poll-stale, 4 metrics-absent, 5 settings-invalid, 6 read-cost-nonzero, 7 read-tokens-nonzero, 8 read-cost-unknown (the FR-9 cost check silently disabled), 11 monitoring-sync-stale, and 13 alerting-reload-failed.
+- **`hos-normal` (normal):** warnings whose failure mode does not affect the decision or is already covered by a high rule if it persists. These are rule 9 history-write-failing (side path only; AD-10 isolation), 10 textfile-error (redundant with rule 4), 12 weekly-time-to-threshold (forecast), and 14 read-timeout (at count 1 it is a single abort; sustained failure fires rule 2 at high after 15 m).
+- The `severity` label stays as TD §6.3 has it. It is descriptive (email text, annotations) and **does not** decide Pushover priority. The receiver decides. Rules 2 and 11 are therefore `severity: warning` but delivered at high priority. That is intended, because both are only-signal rules.
+
+**Fallback if the human rejects H-8:** one contact point `hos` with `hos-pushover` + `hos-email-webhook`, every rule at `hos_pushover_priority_high`, and no `hos-normal`. The only cost is that rules 9, 10, 12 and 14 also arrive at high priority.
+
+### A6-4: Priority values, emergency, resolved notifications (architect recommendation; tunable named values; human confirmation item H-9)
+
+Pushover priorities are −2 (no notification), −1 (quiet), 0 (normal), 1 (high: bypasses the user's quiet hours), and 2 (emergency: repeats every `retry` seconds until acknowledged or `expire` passes; needs both values).
+
+| Named value (contact-point file header) | Default | Meaning |
+|---|---|---|
+| `hos_pushover_priority_high` | **`1`** | priority for `hos-pushover` |
+| `hos_pushover_priority_normal` | **`0`** | priority for `hos-normal-pushover` |
+| `hos_pushover_ok_priority` | **`-1`** | priority of resolved notifications on both Pushover integrations (quiet) |
+| `hos_pushover_emergency_retry_s` | `300` | used only when `hos_pushover_priority_high` is `2` (Pushover minimum 30) |
+| `hos_pushover_emergency_expire_s` | `3600` | used only when `hos_pushover_priority_high` is `2` (Pushover maximum 10800) |
+
+- **No emergency priority by default, including for `pause_condition`.** A pause is the **safe state**: autonomous work stops, and nothing accrues while the human is away. The pause also fires by design every time usage reaches a threshold, which can be weekly or more often. Emergency priority would make a designed-in, safe event repeat until acknowledged, overnight included. That trains the human to dismiss the channel the only-signal alerts depend on. High priority (1) bypasses quiet hours once, which is the right weight for "autonomous work has stopped" and for "the alarm is blind". If the human wants emergency, setting `hos_pushover_priority_high` to `2` applies it to the whole `hos` class, with retry/expire from the header. Emergency for a subset (e.g. only cost-nonzero) would need a third receiver and is out of scope for v1.
+- **Resolved notifications: on**, on all four integrations (`disableResolveMessage: false`, as the email already was). The human needs "autonomous work resumed" and "alarm healthy again" as much as the firing message, and AC-44's procedure records the resolve. On Pushover the resolve is sent **quiet** (−1) so that it never makes a sound at night. The email resolve is unchanged.
+- **Mechanism.** The values are a named-values header at the top of `hos-contact-point.yaml`, using the same YAML-anchor mechanism and fallback as the rules file (A2-13, TD-O-13): an `x-hos-named-values:` block, with `priority:`/`okPriority:`/`retry:`/`expire:` written as aliases. If anchors are rejected, values are inline and a header table plus a static test cover them (AC-45 extended to this file). Tuning is a one-line PR edit to the header, an ordinary MEDIUM change. Any change is visible to the guard test (A6-5).
+- Other Pushover settings: `uploadImage: false` (no image renderer on monitrix); `device` unset (all of the user's devices); default sound; Grafana's default title and message templates. Pushover truncates long messages, and the annotation text is short.
+
+### A6-5: Required-alert guard test (amends A4-3 assertions 2 and 4; D17c)
+
+`tests/framework/test_monitoring_required_alerts.py` stays PR-required, with no markers. A missing file is a failure.
+- **`REQUIRED_ALERTS` maps each UID to `(metric anchor, receiver)`**, a literal in the test file. Receivers come from A6-3: `hos` for every required rule except `hos-history-write-failing` and `hos-read-timeout`, which map to `hos-normal`. **Assertion 2** becomes: `notification_settings.receiver == REQUIRED_ALERTS[uid].receiver`. Moving a rule from `hos` to `hos-normal` is a weakening, and it requires a visible edit to this file.
+- **Assertion 4 (replaced):**
+  - contact point `hos` has exactly two integrations:
+    - `hos-pushover`: `type: pushover`; its token setting holds exactly the env reference to `HOS_ALERT_PUSHOVER_APP_TOKEN` and its user-key setting exactly the env reference to `HOS_ALERT_PUSHOVER_USER_KEY` (the test compares against `"${" + name + "}"` built in code, so no assignment-shaped literal appears in the test either); effective `priority` ∈ {1, 2}, and if it is 2, `retry` ≥ 30 and 0 < `expire` ≤ 10800;
+    - `hos-email-webhook`: as before (`type: webhook`, the email URL env ref, `authorization_scheme: Bearer`);
+  - contact point `hos-normal` has exactly two integrations:
+    - `hos-normal-pushover` with the same env refs and effective `priority` == 0;
+    - `hos-normal-email-webhook` matching `hos-email-webhook`'s settings;
+  - all four integrations have `disableResolveMessage: false`, and both Pushover integrations have effective `okPriority` ∈ {−1, 0};
+  - **no** token `HOS_ALERT_SMS_` and no `sms` integration uid appears anywhere under `contrib/monitoring/`. This records the removal.
+- **Why the priority floors are pinned.** Priority −2 sends nothing and −1 makes no sound, so lowering `hos-pushover` to either would silence the human's only real-time signal without removing any rule. Pinning the floor makes that a guard-test edit. "Effective" means the value after YAML alias resolution, which PyYAML performs.
+- **Fallback (H-8 rejected):** assertion 4 checks only `hos` (as above), and every required rule maps to `hos`.
+
+### A6-6: S5 evidence and definition of done (amends A2-1, A2-18's S5 row, A4-6; D17c)
+
+- **AC-43:** a Grafana **Test** from contact point `hos` arrives on **Pushover (at high priority) and by email**. A Test from `hos-normal` arrives on Pushover (normal) and by email. Record all four receipts with times. There is no deferred half.
+- **AC-42:** `HosMonitoringSyncStale` arrives on Pushover and by email.
+- **AC-44 (definition of done):** **a real pause alert received on Pushover and by email**. It comes from the A4-6 procedure (`HosClaudeUsagePauseCondition` through `hos`), with both receipt times recorded, and then the quiet Pushover resolve and the resolve email after the threshold is restored. Email alone no longer satisfies AC-44. A Test, a stubbed alert, or a Pushover-website test message never satisfies it.
+- **Fail-open gate (A2-18)** is unchanged: only after the AC-43 and AC-44 records.
+- **S5 human actions gain:** a Pushover account and the app installed on the human's device(s); a Pushover application created for HOS; the two env vars set on monitrix **before** the first reload-service start (A6-2); egress from monitrix to api.pushover.net on 443.
+
+### A6-7: Worked example and README (amends A2-13's worked-example bullet; D17b, D17c)
+
+`contrib/monitoring/README.md` and `docs/MONITORING-WORKED-EXAMPLE.md` describe the chain as faberix poller → node_exporter → monitrix Prometheus → Grafana alerting → **Pushover + Cloudflare Worker email**, as "our recommended setup". It is still a worked example, not a requirement (D17b). Pushover setup steps:
+1. Create a Pushover account at `pushover.net` (bare domain, no scheme), install the Pushover app on each device that should receive alerts, and log in. Note the one-time per-platform licence after the trial.
+2. Copy the **user key** shown on the Pushover dashboard.
+3. Create an **application** for HOS (name e.g. "HOS monitrix"), and copy its **API token**.
+4. As root on monitrix, add `HOS_ALERT_PUSHOVER_APP_TOKEN` (the application's API token) and `HOS_ALERT_PUSHOVER_USER_KEY` (the user key) to Grafana's env file. Described in prose only; the doc never shows `NAME=value` (A6-2). Do this **before** the first reload-service start. After any later env-file change, restart grafana-server by hand.
+5. Confirm monitrix can reach api.pushover.net on 443.
+6. Test: Alerting → Contact points → `hos` → Test, then `hos-normal` → Test. Confirm the Pushover priority (high vs normal) and both emails. This is the AC-43 record.
+7. Priority tuning: the contact-point header's named values (A6-4), what each Pushover priority does, and why emergency is off by default.
+8. **What Pushover receives:** alert titles and annotation text (instance, percentages, reasons). It receives no secrets and no URLs (TD §6.3 "No URL anywhere"). Consumers who cannot send that to a third party drop the Pushover integration and keep the metrics contract. HOS guarantees only the poller, the gate and the metrics contract.
+
+### A6-8: Verification gaps (extends A2-21 item 1; block S5 only)
+
+- **V-P1.** In Grafana 13.2.3 file provisioning, the `pushover` integration accepts `apiToken`/`userKey` as `${…}` env references, and accepts `priority`, `okPriority`, `retry`, `expire` and `uploadImage` under those key names, with numeric values (including from YAML aliases). Evidence: the S4 integration lint where available, and the S5 provisioning log plus the AC-43 receipts showing the right priority. **Fallback if a key name differs:** the TD adopts 13.2.3's name, and the guard test follows it. That is a clarifying change, not a new ruling.
+- **V-P2.** What Grafana 13.2.3 does with an empty or invalid Pushover credential at provisioning (refuse to start, or fail per notification). The runbook ordering in A6-2 is binding either way. Record the observed behaviour.
+- **V-P3.** Anchors in `hos-contact-point.yaml` (same question as the rules file, A2-21; same fallback).
+
+### A6-9: Human confirmation required (adds to A4-8's remaining list)
+
+D17c's Pushover-replaces-SMS, email-stays reading is **confirmed** (above) and is not listed. New items; neither blocks S4 coding, because each has a fallback the TD specifies:
+- **H-8 (product boundary: one vs two contact points).** FR-61 says "one contact point". A6-3 needs two (`hos` high, `hos-normal` normal) to send warnings at normal priority, because a Pushover integration has one fixed priority. **Recommendation:** two contact points, both with both channels. **Alternative:** keep one contact point and send everything at high priority. **Human chooses.** Needed before the S4 PR is reviewed.
+- **H-9 (user-visible: Pushover priority values).** **Recommendation:** high = 1 for the `hos` class, including the pause; normal = 0 for `hos-normal`; no emergency; resolves on and quiet (−1). **Alternative:** emergency (2) for the whole `hos` class, retry 300 s, expire 3600 s. These are tunable named values (A6-4), so the human can also change them later by PR. **Human confirms or picks.** Needed before S5's AC-43 run.
+- **H-6 gains (human actions, not confirmations):** Pushover account, app, and application token; the two monitrix env vars set before the first reload-service start; monitrix egress to api.pushover.net:443.
+
+### A6-10: Requirements changes for pm-agent (architect does not edit REQUIREMENTS)
+
+1. **FR-61 (D17c):** replace "**both** an email and an SMS integration" with "**both** a Pushover integration and an email integration". Replace the whole **SMS** sentence group ("**SMS:** a webhook to a relay … the SMS integration is a **placeholder**.") with: "**Pushover:** Grafana's native Pushover integration, with no relay. The Pushover application token and user key live **only** in Grafana's env file on monitrix (D17c)." Then, pending H-8, replace "one contact point" with "one urgent contact point (`hos`) and one normal-priority contact point (`hos-normal`), each with both integrations. Pushover priority is set per contact point, never per channel". If H-8 is rejected, keep "one contact point". Cite D17, D17c.
+2. **FR-63 (D17c):** replace "Cloudflare Worker email + SMS relay" with "Pushover + Cloudflare Worker email".
+3. **New FR, next to FR-61 (D17c, H-9):** "Pushover priorities are named values in the contact-point file: urgent class high (1), normal class normal (0), resolved notifications quiet (−1), no emergency by default. Emergency (2), if chosen, carries retry and expire named values."
+4. **FR-62:** no change to the alert list.
+5. **D-5:** mark **RESOLVED by D17c** (Pushover; no SMS provider is needed).
+6. **D-6:** append "plus the Pushover application token and user key, held only in Grafana's env file on monitrix".
+7. **AC-42:** "the 'dashboard sync stale' alert fires **and arrives on Pushover and by email**".
+8. **AC-43:** replace with: "A test alert sent through each HOS contact point is **received on Pushover and by email**, with the Pushover priority matching the contact point's class. This is a recorded real run."
+9. **AC-44:** replace "produces an alert received by email" with "produces an alert received **on Pushover and by email**". In the H-4 procedure note, replace "observe the pause and the email" with "observe the pause, the Pushover notification and the email".
+10. **AC-47:** replace "which has both an email and an SMS integration" with "each of which has both a Pushover and an email integration (one contact point if H-8 is rejected)". Replace "asserts both integrations" with "asserts both integrations, each required alert's receiver, and the Pushover priority floors (urgent ≥ 1, normal = 0)". The static check also finds no SMS integration.
+11. **Out of scope list:** replace "choosing an SMS provider (D17)" with "an SMS channel (removed by D17c)".
+12. **Every other "SMS" mention** in REQUIREMENTS, e.g. AC-43's "Until then, the SMS integration is present as a placeholder", is deleted or replaced per items 1–11. **Traceability:** FR-61, FR-63, the new FR, D-5, D-6, AC-42, AC-43, AC-44 and AC-47 cite "human ruling, interactive session 2026-10-03, D17c" (and H-8/H-9 once ruled).
+
+Items 1, 2, 3, 5, 6 and 10 should land before the S4 PR is reviewed. Items 7–9 should land before S5.
+
+### A6-11: Affected sign-offs
+
+- **TD-1944:** §6.3, §6.4, §6.7, §6.8, §6.9, §7.2, §9.4, §9.4a, §10, §11.5 (C-14), §13 and Human Review are amended in the same change and tagged "Human ruling D17c". They were authored by the architect from the ruling. **`technical-design` does one consistency pass over the tagged sections before S4 coding**, to keep author and critic separate. The round count is unchanged.
+- **Code, test, review:** no S4 or S5 code or sign-off exists. **Nothing is orphaned.** S1 (in review), S2 and S3 do not touch alerting delivery and are unaffected.
+- **ADR text:** A2-13, A2-18 (S5 row), A4-3, A4-6, A4-8 and A4-9 item 5 carry inline pointers to this amendment.
+
+**Self-flag.** RISK: MEDIUM for this amendment, overall RISK HIGH unchanged. The alert path is the human's only signal, and this changes one of its two channels from a non-functional placeholder to a live one, which is strictly an improvement in delivered coverage. The main new failure modes are a mis-set priority silencing Pushover (guarded by A6-5's floors) and missing credentials blocking Grafana's start (A6-2 ordering, V-P2). CONFIDENCE: HIGH on A6-1, A6-2, A6-5, A6-6 and A6-7. MEDIUM-HIGH on A6-3/A6-4 until V-P1 confirms 13.2.3's Pushover setting names and numeric env/alias handling. BLAST RADIUS: `contrib/monitoring/grafana/provisioning/alerting/hos-contact-point.yaml` (+1 contact point, SMS removed), each rule's receiver, the guard test, README, worked-example doc, monitrix's Grafana env file (+2 secrets), and monitrix egress (+api.pushover.net). No `bin/` or decision-path change. Change classification: STRUCTURAL (human-ruled channel), plus ADDITIVE architect decisions A6-3/A6-4 pending H-8/H-9.
