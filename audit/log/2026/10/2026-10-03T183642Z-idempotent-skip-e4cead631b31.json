@@ -1,0 +1,1 @@
+{"decision":"HUMAN_REQUIRED","event":"idempotent-skip","head_sha":"ccca82fbfff57221cdf14a978adb40385cdea501","pr":1970,"summary":"#1215 precheck: head unchanged since 18:28Z HUMAN_REQUIRED verdict, no new human comments/reviews; tests check now green (the condition the verdict anticipated), disposition unchanged","tier":"HIGH"}
