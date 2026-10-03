@@ -13,7 +13,15 @@ it) are marked **[DERIVED]** and listed for human confirmation in §8.
 defaults as **[ASSUMED, pending human confirmation in ADR review]**. These are not rulings
 (Q6, Q7, Q10 → AS-1..AS-3). Finally, it adds the #1944 2026-10-02T23:06:30Z addendum to the
 Prometheus/Grafana traceability.
-**Date:** 2026-10-02
+**Amendment 2 (2026-10-03, pm-agent):** Applies the two requirements changes requested by ADR-1944
+Amendment 1 A1-3 and TD-1944 §9.1 (TD-O-3, TD-O-4). (1) **FR-11** is narrowed so that read success is
+decided by output content, not by the `claude` process exit code; transport failures (ssh failure,
+spawn failure, timeout) still fail the read regardless of content. This narrows a ruled failure list
+in the less-pausing direction, so it is **structural and PENDING HUMAN CONFIRMATION** (ADR §5 item 12);
+the original text is kept, struck, for history. (2) **AC-25** is reworded to a checkable criterion,
+because the real success output has no `$0.0000` cost footer (TD-VF-8; ADR §5 item 13). §7 and §8 are
+updated to match (C-6, C-7).
+**Date:** 2026-10-02 (Amendment 2: 2026-10-03)
 **Author:** pm-agent
 **Source issues:** #1944 (open, `priority:critical`, v0.6.1. Its body is authoritative, and its
 2026-10-02 "Design decisions ruled today" section governs wherever it conflicts with older material);
@@ -157,9 +165,21 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   primary path. The reference script is a verified starting point, not reviewed production code. It
   must still go through normal review.
 - **FR-11: A read counts as SUCCESSFUL only if it yields a numeric current-session percentage and a
-  numeric all-models current-week percentage.** Every other result is a **FAILED read**: missing
-  either value, non-numeric, SSH failure, non-zero exit, timeout, or garbled output. This is the
-  reference parser's own success condition (`[[ -n "$session_pct" && -n "$weekly_all_pct" ]]`).
+  numeric all-models current-week percentage.** **[Amendment 2 — architect ruling A1-3; PENDING
+  HUMAN CONFIRMATION]** Success is decided by the read's output **content**: both values parsed. It
+  is **not** decided by the `claude` process exit code. A non-zero remote exit with both values
+  present is a SUCCESSFUL read, and the exit code is recorded (FR-13). A read is **FAILED** if either
+  value is missing or non-numeric, or the output is empty or garbled. It is also **FAILED, regardless
+  of content**, on any transport failure: an SSH failure, a failure to spawn the read, or a timeout
+  (FR-7). This is the reference parser's own success condition
+  (`[[ -n "$session_pct" && -n "$weekly_all_pct" ]]`), which is content-only.
+  *Original text (superseded on human confirmation; retained for history):*
+  ~~Every other result is a **FAILED read**: missing either value, non-numeric, SSH failure,
+  non-zero exit, timeout, or garbled output.~~
+  *Why it changed:* the "non-zero exit" item conflicted with FR-13 ("never from the process exit
+  code") and with FR-11's own cited source. The change narrows the failure list in the less-pausing
+  direction, so it waits on human confirmation (§8 C-6). Until confirmed, the original text is the
+  ruled requirement, and the design's override rests on the architect ruling alone.
 - **FR-12: The silent-empty-session shape is a FAILED read and must never be read as 0% usage.**
   That shape is `Total cost: $0.0000 … Usage: 0 input, 0 output, 0 cache read, 0 cache write` with
   no `% used` lines (PR #1450, 07:48:32Z, Test 1). This is the #1362 / #1369 "silently reports clean"
@@ -436,7 +456,15 @@ Every criterion applies to both the worker and overseer roles.
   no code change, and every project on the host picks it up.
 - **AC-24 (negative, VF-2):** A worker transcript containing "usage limit reached" or any threshold
   wording, while `/usage` reads under threshold → no proactive pause.
-- **AC-25:** A primary-path read reports `$0.0000` / `0 input, 0 output`, meaning no model call.
+- **AC-25 (Amendment 2, FR-9; TD-O-4):** A primary-path read makes no model call. Verified by all of:
+  (a) the AC-21 stub test passes, confirming no model call is made on the read path; (b) where the
+  forced-command `authorized_keys` form is adopted, a recorded `--check` run shows the forced command,
+  so the loopback key can only run the `/usage` read and cannot carry a prompt; (c) two real reads
+  taken 10 s apart, with no other Claude activity on the host, report the same `session_pct`.
+  *Original text (replaced; unobservable):* ~~A primary-path read reports `$0.0000` /
+  `0 input, 0 output`, meaning no model call.~~ The real success output has no `Total cost:` /
+  `Usage:` footer. That footer appears only in the empty-session **failure** shape (FR-12), so the
+  original criterion could never be met by a successful read (TD-VF-8).
 - **AC-26:** The existing suite (`scripts/framework/run_tests_inner_loop.sh`) passes, including
   T4.1 once Q8 is resolved.
 - **AC-27 (Amendment 1, FR-50):** The `/usage` read happens only in the standalone poller.
@@ -534,7 +562,9 @@ From #1944 (carried over unchanged):
 | FR-7 | #1944 History restating 08-17 ("no reading, error, timeout") |
 | FR-8 | #1944 10-02 "Poll interval" |
 | FR-9 | #1944 "Confirmed separately: `/usage` costs nothing" |
-| FR-10, FR-11 | #1944 Reference; #1446 05:17:05Z (`usage-parse.sh` `parse_grep`) |
+| FR-10 | #1944 Reference; #1446 05:17:05Z (`usage-parse.sh` `parse_grep`) |
+| FR-11 | #1944 Reference; #1446 05:17:05Z (`usage-parse.sh` `parse_grep`, content-only success condition); **Amendment 2:** ADR-1944 Amendment 1 A1-3, TD-1944 §9.1 TD-O-3 (content decides; transport failures fail) — **PENDING HUMAN CONFIRMATION** (ADR §5 item 12) |
+| AC-25 | FR-9; **Amendment 2:** TD-1944 TD-VF-8, §3.13 item 3, §9.1 TD-O-4 (substitute verification); ADR §5 item 13 |
 | FR-12, FR-13 | PR #1450 07:48:32Z Test 1; #1944 History; #1944 Related (#1362/#1369) |
 | FR-14 | #1944 Reference; #1446 05:17:05Z |
 | FR-15 | #1446 05:17:05Z (`parsed_via`); #1446 05:25:22Z (status contents) |
@@ -609,6 +639,19 @@ From #1944 (carried over unchanged):
 - **A-1, assumed defaults:** AS-1 (Q6), AS-2 (Q7), and AS-3 (Q10) were adopted by the
   orchestrating session and are **not** human rulings. They are marked [ASSUMED, pending human
   confirmation in ADR review] everywhere they appear.
+- **C-6, exit code vs content (Amendment 2; PENDING HUMAN CONFIRMATION):** FR-11's failure list
+  included "non-zero exit", while FR-13 said success is "never from the process exit code" and
+  FR-11's own cited source (the reference parser) is content-only. ADR-1944 AD-4 bound "not the exit
+  code" (TD-O-3). **Architect ruling A1-3:** content decides; a transport failure (ssh failure, spawn
+  failure, timeout) is a FAILED read whatever the content; any other remote exit is recorded and does
+  not by itself fail the read. FR-11 is amended to match, with the original text struck. **Structural**
+  (narrows a ruled failure list in the less-pausing direction), so it needs human confirmation
+  (ADR §5 item 12).
+- **C-7, AC-25 unobservable (Amendment 2):** AC-25 asked for `$0.0000` on a primary-path read, but
+  the real success output has no cost footer; only the empty-session failure shape does (TD-VF-8).
+  Reworded to the TD §3.13 item 3 substitute (TD-O-4). **Clarifying**: FR-9 (no model call, no token
+  cost) is unchanged; only the verification method changes. Listed for human visibility as ADR §5
+  item 13.
 
 ---
 
@@ -626,6 +669,8 @@ Classification: **additive** for FR-1 to FR-21, FR-23, FR-26 to FR-29, FR-31 to 
 to "obsolete" is a human-ruled structural change, already signed off in the interactive session.
 **Structural / needs human confirmation:** FR-22, FR-24, FR-25, and FR-30 ([DERIVED]); AS-1, AS-2,
 and AS-3 ([ASSUMED]); and Q11.
+*Amendment 2:* the FR-11 narrowing (C-6) is **structural**: it is pending human confirmation and
+has not been applied as a ruling. The AC-25 rewording (C-7) is **clarifying**.
 
 ## Human Review Required
 
@@ -636,3 +681,7 @@ and AS-3 ([ASSUMED]); and Q11.
    in ADR review. **Q11** (invalid-settings behavior) still needs a product ruling.
 4. **D-1:** Provide a real `/usage` capture that includes the "Approximate, based on local sessions
    on this machine" breakdown section.
+5. **Amendment 2, FR-11 (C-6):** Confirm or reject the narrowing. A non-zero remote `claude` exit
+   with both `% used` values parsed would count as a SUCCESSFUL read (no pause); transport failures
+   and content failures still fail. Until confirmed, the struck original text is the ruled
+   requirement. AC-25's rewording (C-7) is clarifying and listed for visibility only.
