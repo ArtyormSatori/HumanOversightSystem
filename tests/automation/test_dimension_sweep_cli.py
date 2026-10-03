@@ -55,8 +55,13 @@ def _claude_tripwire(monkeypatch, tmp_path_factory):
 
 
 def _real_measurement_files() -> int:
+    # Only the two event families this module could pollute: concurrent cron cycles write
+    # other records into the real tree, so counting every *.json would flake.
     log = REPO_ROOT / "audit" / "log"
-    return sum(1 for _ in log.rglob("*dimension-measurement*.json")) if log.is_dir() else 0
+    if not log.is_dir():
+        return 0
+    patterns = ("*dimension-measurement*.json", "*agent-invocation*.json")
+    return sum(1 for pattern in patterns for _ in log.rglob(pattern))
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -123,6 +128,10 @@ def _records(root: Path, event: str | None = None) -> list[dict]:
         if event is None or record.get("event") == event:
             out.append(record)
     return out
+
+
+def _records_start_files(root: Path) -> list[Path]:
+    return list((root / "audit" / "log").rglob("*dimension-measurement-start*.json"))
 
 
 def _doc(
@@ -365,8 +374,29 @@ def test_T6_05_render_is_deterministic_and_clean(repo, monkeypatch, capsys):
     base_sha, head_sha = _git(repo, "rev-parse", BASE), _git(repo, "rev-parse", "HEAD")
     first = sweep._render_input(b"T\n", base_sha, head_sha, ["b.py", "a.py"])
     assert first == sweep._render_input(b"T\n", base_sha, head_sha, ["a.py", "b.py"])
-    assert f"git diff {base_sha}...{head_sha} -- <path>\n" in first.decode()
-    assert first.decode().index("- a.py") < first.decode().index("- b.py")
+    severities = ", ".join(aic.SEVERITIES)
+    literal = (
+        "T\n"
+        "\n## Changes under review\n"
+        "\n"
+        f"Base commit: {base_sha}\n"
+        f"Head commit: {head_sha}\n"
+        f"Inspect each selected file's change with: git diff {base_sha}...{head_sha} -- <path>\n"
+        "\n"
+        "Selected files:\n"
+        "- a.py\n"
+        "- b.py\n"
+        "\n## Response format\n"
+        "\n"
+        "Respond with exactly one JSON object and nothing else.\n"
+        "\n"
+        "- `verdict` is one of `approve` or `request_changes`.\n"
+        "- `findings` is a list. Each finding has `severity` (one of "
+        f"{severities}), `file`, `line`, `category` and `description`.\n"
+        "- `summary` is a string.\n"
+        "- The keys `applicability`, `outcome`, `input` and `invocation` must not appear.\n"
+    )
+    assert first == literal.encode()
 
 
 def test_T6_06_not_applicable(tmp_path, monkeypatch, capsys):
@@ -447,6 +477,27 @@ def test_T6_08b_zero_count_prints_nothing_and_timeout_does_not_evaluate(tmp_path
         "dimension_sweep: terminal_reason evaluated on 0 runs — "
         "ADR-1643 §9.2 residual not yet discharged\n"
     ) == err
+
+
+def test_T6_08c_runner_timeout_is_not_launched(tmp_path, capsys):
+    root = tmp_path / "rt"
+    sweep._write(
+        _fixture_result("ok", "2026-10-01T00:00:01Z", launched=True, outcome_detail=None), root
+    )
+    sweep._write(
+        _fixture_result(
+            "rt", "2026-10-01T00:00:02Z", runner_outcome="runner_timeout", launched=True
+        ),
+        root,
+    )
+    assert sweep.main(["report"], repo_root=root) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["runs"] == 2 and report["by_runner_outcome"] == {
+        "measured": 1,
+        "runner_timeout": 1,
+    }
+    assert report["launched"] == 1 and report["terminal_reason_evaluated"] == 1
+    assert report["by_outcome_detail"] == {"null": 1}
 
 
 def test_T6_09_usage_limit(repo, monkeypatch, capsys):
@@ -538,9 +589,46 @@ def test_T6_14_git_error_and_nul_separated_paths(repo, monkeypatch, capsys):
     assert matched == ["src/a.py", "src/é.py"]
 
 
+def test_T6_14_numstat_rename_and_binary_entries():
+    out = b"1\t2\t\0old.py\0new.py\0-\t-\tbin.png\0" + "3\t0\tsrc/é.py\0".encode()
+    assert sweep._parse_numstat(out) == {"new.py": 3, "bin.png": 0, "src/é.py": 3}
+    with pytest.raises(sweep._Fail):
+        sweep._parse_numstat(b"garbage\0")
+    with pytest.raises(sweep._Fail):
+        sweep._parse_numstat(b"1\t2\t\0only-old\0")
+
+
+def test_T6_14_rename_is_matched_under_its_new_name(repo, monkeypatch, capsys):
+    (repo / "src" / "old.py").write_text("a\nb\nc\nd\ne\n")
+    _commit(repo, "add old")
+    _git(repo, "tag", "mid")
+    _git(repo, "mv", "src/old.py", "src/new.py")
+    (repo / "src" / "new.py").write_text("a\nb\nc\nd\nZ\n")
+    _commit(repo, "rename")
+    seam = install(monkeypatch, Seam())
+    rc, out, _ = measure(repo, capsys, base="mid")
+    assert rc == 0, out
+    matched = [seam.calls[0][i + 1] for i, a in enumerate(seam.calls[0]) if a == "--matched-file"]
+    assert matched == ["src/new.py"]
+    assert result_of(repo)["matched_lines_changed"] == 2
+
+
+def test_T6_14_pl1_bad_changed_file(repo, monkeypatch, capsys):
+    (repo / "src" / "we\nird.py").write_text("z = 3\n")
+    _commit(repo, "newline in path")
+    seam = install(monkeypatch, Seam())
+    rc, _, _ = measure(repo, capsys)
+    result = result_of(repo)
+    assert rc == 1 and not seam.calls
+    assert result["runner_outcome"] == "git_error" and result["error_code"] == "bad_changed_file"
+
+
 def test_T6_14b_option_like_base_is_a_usage_error(repo, monkeypatch, capsys):
     seam = install(monkeypatch, Seam())
-    rc, out, err = measure(repo, capsys, base="--output=x")
+    rc = sweep.main(["measure", "--base=--output=x"], repo_root=repo)
+    captured = capsys.readouterr()
+    out, err = captured.out, captured.err
+    assert "must be a ref" in err
     assert rc == 2 and out == "" and err.count("\n") == 1 and not seam.calls
     assert not (repo / "audit").exists()
 
@@ -703,6 +791,58 @@ def test_T6_20b_unwritable_start_record(repo, monkeypatch, capsys):
     assert result["error_code"] == "start_record_unwritable" and result["launched"] is False
     assert any(line.startswith("dimension_sweep: record not written:") for line in err.splitlines())
     assert _records(repo, sweep.EVENT_RESULT) == [result]
+
+
+def test_T6_20c_lock_file_unopenable_is_recorded(repo, monkeypatch, capsys):
+    seam = install(monkeypatch, Seam())
+    common = Path(_git(repo, "rev-parse", "--git-common-dir"))
+    (repo / common / "hos-w6-measure.lock").mkdir()
+    rc, out, _ = measure(repo, capsys)
+    result = json.loads(out)
+    assert rc == 1 and not seam.calls
+    assert result["runner_outcome"] == "git_error" and result["error_code"] == "lock_unopenable"
+    assert _records(repo, sweep.EVENT_RESULT) == [result]
+
+
+def test_T6_20d_input_tempfile_failure_is_recorded(repo, monkeypatch, capsys):
+    seam = install(monkeypatch, Seam())
+
+    def boom(*a, **k):
+        raise OSError("no space")
+
+    monkeypatch.setattr(sweep.tempfile, "mkstemp", boom)
+    rc, out, _ = measure(repo, capsys)
+    result = json.loads(out)
+    assert rc == 1 and not seam.calls and not _records(repo, sweep.EVENT_START)
+    assert result["runner_outcome"] == "audit_unwritable"
+    assert result["error_code"] == "input_tempfile_unwritable"
+
+
+def test_T6_20e_malformed_audit_record_blocks_launch(repo, monkeypatch, capsys):
+    seam = install(monkeypatch, Seam())
+    bad = repo / "audit" / "log" / "2026" / "10" / "bad-record.json"
+    bad.parent.mkdir(parents=True)
+    bad.write_text("{")
+    rc, out, _ = measure(repo, capsys)
+    result = json.loads(out)
+    assert rc == 1 and not seam.calls and not _records_start_files(repo)
+    assert result["runner_outcome"] == "audit_unwritable"
+    assert result["error_code"] == "audit_tree_unreadable"
+
+
+def test_T6_20f_unreadable_audit_tree_blocks_launch(repo, monkeypatch, capsys):
+    seam = install(monkeypatch, Seam())
+
+    def boom(root):
+        raise PermissionError("denied")
+        yield b""  # pragma: no cover — makes this a generator, like read_stream
+
+    monkeypatch.setattr(sweep._audit_log(), "read_stream", boom)
+    rc, out, _ = measure(repo, capsys)
+    result = json.loads(out)
+    assert rc == 1 and not seam.calls
+    assert result["runner_outcome"] == "audit_unwritable"
+    assert result["error_code"] == "audit_tree_unreadable"
 
 
 def test_T6_21_unwritable_result_record(repo, monkeypatch, capsys):

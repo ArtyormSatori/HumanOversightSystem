@@ -266,7 +266,7 @@ def _parse_numstat(out: bytes) -> dict[str, int]:
             raise _Fail("git_error", "git_failed", "unparseable git numstat output")
         added, deleted, raw_path = parts
         if raw_path == b"":
-            if i + 2 >= len(tokens):
+            if i + 2 >= len(tokens) or not tokens[i + 2]:
                 raise _Fail("git_error", "git_failed", "unparseable git numstat rename entry")
             raw_path = tokens[i + 2]
             i += 3
@@ -340,7 +340,10 @@ class _Lock:
         self._fh: IO[str] | None = None
 
     def acquire(self, path: Path) -> None:
-        fh = open(path, "a")
+        try:
+            fh = open(path, "a")
+        except OSError as exc:
+            raise _Fail("git_error", "lock_unopenable", f"cannot open {path}: {exc}") from None
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
@@ -542,8 +545,9 @@ def _find_prior(root: Path, digest: str) -> str | None:
             ):
                 ts = audit.normalize_ts(record["timestamp"])
                 return audit.record_relpath(record, ts)
-    except (ValueError, KeyError) as exc:
-        sys.stderr.write(f"dimension_sweep: reuse check skipped: {_one_line(str(exc))}\n")
+    except (OSError, ValueError, KeyError) as exc:
+        # Fail closed: launching would spend quota on a state the reuse check could not verify.
+        raise _Fail("audit_unwritable", "audit_tree_unreadable", f"reuse check: {exc}") from None
     return None
 
 
@@ -648,10 +652,16 @@ def _measure(args: argparse.Namespace, root: Path, rec: dict, lock: _Lock) -> No
     argv = prefix + ["--posture", binding.posture]
     if not args.allow_keychain_auth:
         argv.append("--require-env-auth")
-    fd, tmp_name = tempfile.mkstemp(prefix="hos-w6-input-")
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(rendered)
+        fd, tmp_name = tempfile.mkstemp(prefix="hos-w6-input-")
+    except OSError as exc:
+        raise _Fail("audit_unwritable", "input_tempfile_unwritable", str(exc)) from None
+    try:
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(rendered)
+        except OSError as exc:
+            raise _Fail("audit_unwritable", "input_tempfile_unwritable", str(exc)) from None
         _launch(args, root, rec, argv + ["--input-file", tmp_name] + common, binding, digest)
     finally:
         os.unlink(tmp_name)
@@ -688,7 +698,7 @@ def _launch(
             raise _Fail("audit_unwritable", "start_record_unwritable", str(exc)) from None
     began = time.monotonic()
     try:
-        _observe(args, rec, argv, binding, digest, began, is_launch=is_launch)
+        _observe(args, rec, argv, binding, digest, began)
     except _Fail:
         raise
     except BaseException as exc:
@@ -714,15 +724,12 @@ def _observe(
     binding: dr.Binding,
     digest: str | None,
     began: float,
-    *,
-    is_launch: bool,
 ) -> None:
     """Seam call and document ingestion. Raises _Fail on any no-document path."""
     try:
         rc, out, err = _run_primitive(argv, timeout_s=_runner_timeout_s(binding.timeout_seconds))
     except _PrimitiveTimeout:
         rec["runner_wall_ms"] = int((time.monotonic() - began) * 1000)
-        rec["launched"] = is_launch
         raise _Fail(
             "runner_timeout", None, "the primitive exceeded the runner wall clock"
         ) from None
@@ -789,7 +796,10 @@ def _read_measurements(root: Path, since: str | None) -> tuple[list[dict], list[
 
 
 def _build_report(results: list[dict], starts: list[dict], since: str | None) -> dict:
-    launched = [r for r in results if r.get("launched") is True]
+    # Document-bearing records only (TD-D65): a run with no document is never "launched".
+    launched = [
+        r for r in results if r.get("launched") is True and r.get("runner_outcome") == "measured"
+    ]
     evaluated = [r for r in launched if r.get("outcome_detail") not in _PRE_EVALUATION_DETAILS]
     produced = [r for r in launched if r.get("payload_extractable") is True]
     completed = [r for r in launched if r.get("outcome") == "completed"]
