@@ -1,6 +1,15 @@
 # TECHNICAL DESIGN — ADR-1944: proactive Claude usage-threshold pause. A loopback poller writes one reading, `hos-cron` gates every cycle on it, and the monitoring path can never touch the decision
 
-**Status:** **Revision 2 (ADR A2) + Architect round 2 (2026-10-03): APPROVED WITH CHANGES.** The round-2 changes are applied inline, each tagged **"Architect round 2"**, and listed in §11.3. ADR Amendment 3 records the four ADR-level refinements (A3-1 to A3-5). Coding gates are unchanged: S1 may start; S2 waits on H-1, S4 on H-2/H-3, S5 on H-4 (§13). (Round count: the amended sections opened at round 1 under A2-22; this is round 2 of 5.) Revision 1 (DRAFT-1 plus Architect round 1, "approved with changes", 2026-10-03) was built against ADR text that Amendment 2 supersedes: AD-3's per-role status file, AD-8's issue machinery, AD-5's `env -u` command, the two-threshold rule, plain-text parsing, and AD-12's slicing. This revision implements ADR-1944 Amendment 2 (A2-1 to A2-22) and Requirements Amendment 3 (human rulings D1–D19, interactive session 2026-10-03). Every section changed by this revision is headed or tagged **"Revision 2 (ADR A2)"**. Text that A2 removes is deleted. A one-line "Removed by Revision 2" note marks where it stood, and git history keeps the old text (commit `918fe1769`, `67769516b`). Material that Amendment 2 leaves standing is kept and tagged "unchanged".
+**Status:** **Revision 2 (ADR A2) + Architect round 2 (2026-10-03): APPROVED WITH CHANGES.** The round-2 changes are applied inline, each tagged **"Architect round 2"**, and listed in §11.3. ADR Amendment 3 records the four ADR-level refinements (A3-1 to A3-5). **Human rulings H-1..H-4, H-7 (interactive session 2026-10-03; ADR Amendment 4) are applied inline, tagged "Human rulings H-1..H-4, H-7".** No human ruling is outstanding (§13).
+
+**Coding gates (§8):**
+- S1 may start.
+- S2 starts only after S1 is deployed, its exit records are posted, and the **H-7 trip test** is recorded (§3.15).
+- S3 follows S1, plus the §5.1 probe.
+- S4 follows S3.
+- S5 follows S4.
+
+**Build mode:** #1944 is built in the human's interactive worker session, not by autonomous pickup (no `needs-ai`). Per ADR A4-10, `technical-design` does one consistency pass over the sections tagged "Human rulings H-1..H-4, H-7" before the S1 PR (for §3.10 item 10) and before S4 coding. (Round count: the amended sections opened at round 1 under A2-22; this is round 2 of 5.) Revision 1 (DRAFT-1 plus Architect round 1, "approved with changes", 2026-10-03) was built against ADR text that Amendment 2 supersedes: AD-3's per-role status file, AD-8's issue machinery, AD-5's `env -u` command, the two-threshold rule, plain-text parsing, and AD-12's slicing. This revision implements ADR-1944 Amendment 2 (A2-1 to A2-22) and Requirements Amendment 3 (human rulings D1–D19, interactive session 2026-10-03). Every section changed by this revision is headed or tagged **"Revision 2 (ADR A2)"**. Text that A2 removes is deleted. A one-line "Removed by Revision 2" note marks where it stood, and git history keeps the old text (commit `918fe1769`, `67769516b`). Material that Amendment 2 leaves standing is kept and tagged "unchanged".
 **Date:** 2026-10-03 (Revision 1: 2026-10-02)
 **Author:** technical-design
 **Baseline:** worktree `interactive-1944-proactive-usage-pause-design`, HEAD `0603100b9` (ADR Amendment 2). `bin/hos-cron` is 2245 lines and every anchor cited below was re-read at this HEAD (TD-VF-14).
@@ -24,8 +33,9 @@
 | Settings | 8 keys incl. `failopen_issue_after` | 10 keys; `weekly_model_threshold`, `history_days`, `history_max_mb`; `failopen_issue_after` removed; single defaults block | A2-10 |
 | Side paths | `.prom` | `.prom` (with re-render), daily JSONL history + prune, `export`, `last-raw` | A2-11 |
 | Metrics | `threshold_percent{window}` | `threshold_percent{limit}`, + `staleness_seconds`, `read_cost_usd`, `read_tokens`, `history_write_ok` | A2-12 |
-| monitrix | Prometheus rules file, Alertmanager | Grafana alerting (12 rules), contact point `hos` (email webhook + SMS placeholder), sparse anonymous clone, sync job, reload | A2-13, A2-14 |
+| monitrix | Prometheus rules file, Alertmanager | Grafana alerting (12 rules; 13 after H-3), contact point `hos` (email webhook + SMS placeholder), sparse anonymous clone, sync job, reload | A2-13, A2-14 |
 | Slices | S1–S4 | S1–S4 + S5 (live delivery, AC-44 = definition of done) | A2-18 |
+| **Human rulings H-1..H-4, H-7** | — | `cycle-usage-unchecked` per fail-open cycle plus exact release-note sentence (H-1); **no** protected-surface entry, and a required-alert guard test instead (H-2); systemd path unit + reload script with rollback, and rule 13 (H-3); AC-44 procedure confirmed (H-4); S1 trip test gates S2, plus a `--check` INFO 10 line (H-7) | A4-1 to A4-7 |
 
 ---
 
@@ -106,7 +116,7 @@ Everything the gate needs is defined before `:366`: `ROLE`, `PROJECT`, `_HOS_CRO
 
 **TD-VF-18 — paused-cycle audit records are not synced until the next running cycle.** `_audit` writes under `REPO_ROOT/audit/log/` (`cycle_log.py:57-66`), and the only push is `_sync_audit_logs` at `:2234`, which a paused cycle never reaches. During a long pause, records accumulate in the clone. Informational, **TD-O-18**.
 
-**TD-VF-19 — protected-surface edits come in threes.** `scripts/framework/protected_surfaces.txt` (header) must stay in sync with `docs/AGENT-IDENTITY.md` §9.0 and the generated `.github/CODEOWNERS` (`tests/framework/test_codeowners_current.py`). S4's `contrib/monitoring/**` entry (A2-14, pending H-2) therefore edits all three.
+**TD-VF-19 — protected-surface edits come in threes.** `scripts/framework/protected_surfaces.txt` (header) must stay in sync with `docs/AGENT-IDENTITY.md` §9.0 and the generated `.github/CODEOWNERS` (`tests/framework/test_codeowners_current.py`). ~~S4's `contrib/monitoring/**` entry (A2-14, pending H-2) therefore edits all three.~~ **Human rulings H-1..H-4, H-7:** H-2 is rejected, so #1944 edits none of the three (ADR A4-2). The finding stands as a fact about the repo.
 
 **TD-VF-20 — `cycle_log.log_event` defaults `role` to `"worker"`** (`cycle_log.py:58-62`) and overrides it from kwargs. Every usage-pause event must pass `role=$ROLE` explicitly or overseer events are mislabelled.
 
@@ -266,11 +276,11 @@ The bash crash fallback follows the same steps with `printf … > <file>.tmp; mv
 | Event | Emitted by | When | argv, **one `key=value` per element**, in this order |
 |---|---|---|---|
 | `cycle-usage-paused` | gate | every paused cycle, including `check_error` | `role=$ROLE` `project=$PROJECT` `cycle_id=$HOS_CYCLE_ID` `reason=<reason text>` `session_pct=<n\|->` `weekly_all_pct=<n\|->` `reading_age_s=<n\|->` `fail_mode=<closed\|open\|->` `settings=<valid\|defaults\|invalid:<key>\|->` |
-| `cycle-usage-unchecked` | gate | **only if H-1 adopts the architect's recommendation (§13):** every fail-open cycle that runs without a fresh successful reading | same fields as above |
+| `cycle-usage-unchecked` | gate | **Human rulings H-1..H-4, H-7 (H-1 confirmed, ADR A4-1):** every cycle whose verdict is `class=failopen` (fail-open, runs without a usable successful reading). Never on `class=ok`. No block, no issue. | same fields, same order, one `key=value` per argument (incl. `project`, `cycle_id`) |
 
 - `project` and `cycle_id` are additive to A2-5's field list (TD-O-21).
 - `-` means "unknown"; `cycle_log` stores it as the string `"-"`.
-- No event on a running cycle; the existing `cycle-start` (`:1823`) records it. Resume is visible as a `cycle-start` with no preceding `cycle-usage-paused` (A2-5).
+- No usage event on a `class=ok` running cycle; the existing `cycle-start` (`:1823`) records it. A `failopen` cycle's `cycle-usage-unchecked` is written before audit-log sync and pushed by that same cycle. Resume is visible as a `cycle-start` with no preceding `cycle-usage-paused` (A2-5).
 - The poller emits no audit (FR-34). **No decision reads an audit event.**
 
 ### 1.8 Settings — `$HOME/.config/hos/usage-pause.conf` — Revision 2 (ADR A2-10)
@@ -413,10 +423,12 @@ Each must classify `empty_session`, and AC-4's "cost 0 is not success" is assert
 | Q | `docs/UPGRADE-PR-REVIEW-CHECKLIST.md` | changed | new §H "Usage-pause gate (#1944)" | S2 | no |
 | Q2 | `docs/releases/v0.7.0.md` | changed/created | "Upgrade notes" paragraph (TD-O-19) | S2 | yes (`docs/releases/**`) |
 | R | `tests/automation/test_usage_pause_{prom,history,export}.py` | new | render, history, prune, export | S3 | no |
-| S | `contrib/monitoring/**` | new | §6 layout: dashboards, provisioning, alert rules, contact point, monitrix sync script, reload units, README | S4 | **yes after S4** (pending H-2) |
+| S | `contrib/monitoring/**` | new | §6 layout: dashboards, provisioning, alert rules, contact point, monitrix sync script, reload script and units, README | S4 | **no** (H-2 rejected; ADR A4-2) |
+| T2 | `tests/framework/test_monitoring_required_alerts.py` | new | required-alert guard (§9.4a; H-2 replacement control, ADR A4-3) | S4 | no |
+| T3 | `tests/framework/test_grafana_alerting_reload.py` | new | reload script and units (§6.6; H-3) | S4 | no |
 | S2' | `docs/MONITORING-WORKED-EXAMPLE.md` | new | "recommended setup" doc (§6.8) | S4 | no |
 | T | `tests/framework/test_contrib_monitoring.py`, `tests/framework/test_monitoring_sync.py` | new | structure, PromQL, no-literal, no-secret, sync behavior | S4 | no |
-| U | `scripts/framework/protected_surfaces.txt`, `docs/AGENT-IDENTITY.md` §9.0, `.github/CODEOWNERS` (regenerated) | changed | `contrib/monitoring/**` (pending H-2; TD-VF-19) | S4 | yes |
+| ~~U~~ | ~~`scripts/framework/protected_surfaces.txt`, `docs/AGENT-IDENTITY.md` §9.0, `.github/CODEOWNERS`~~ | **not changed** | **Human rulings H-1..H-4, H-7:** H-2 rejected; no protected-surface entry is added (ADR A4-2) | — | — |
 
 ~~`docs/LABELS.md` writer row~~ **Removed by Revision 2 (ADR A2-5):** the gate writes no label.
 
@@ -631,6 +643,7 @@ Read-only and idempotent. Takes no lock and writes nothing under `$STATE` or `/v
    - else PASS `<path>: gate present`.
    No `hos-cron` line at all → INFO `no hos-cron scheduled in this user's crontab`. **The runbook requires item 8 green after every upgrade of any project** (A2-4).
 9. (S3) Export path, unchanged from Revision 1 item 7: `/var/lib/hos-usage` absent → SKIP; else writable, and exactly one of (symlink resolves to the file) / (`ARGS` has the second textfile directory); both → FAIL; neither → FAIL with the ESM-purge remedy.
+10. **Human rulings H-1..H-4, H-7 (H-7, ADR A4-7; S1).** Runs after item 7 and only when item 7 printed `SUCCESS`; otherwise `SKIP 10 no successful read`. It evaluates the item-7 read against the **current** settings with the same function the poller uses for `poll_pause_condition`/`poll_pause_reason` (§3.6, poll view), then prints `INFO 10 pause_condition=<0|1> reason=<text>`. The text is in exactly the `poll_pause_reason` format (§1.2), e.g. `INFO 10 pause_condition=1 reason=session 7% >= 5`. Under invalid settings it prints `INFO 10 pause_condition=1 reason=settings_invalid:<key>`. **Always INFO, never FAIL:** a pause condition is not a setup fault, and `RESULT:` is unaffected. Item 10 writes nothing (the read-only rule holds). It is the `--check` half of the trip-test evidence (§3.15).
 
 ### 3.11 `--print-setup` — Revision 2 (ADR A2-9, A2-16)
 
@@ -655,7 +668,7 @@ Prints, in order, with headings:
 ### 3.13 Runbook — `docs/CRON-SETUP.md` §2a "Usage-pause poller (SSH loopback)" — Revision 2 (ADR A2)
 
 Outline (S1 writes all except 2a.8, which S3 adds; S2 adds 2a.0 and the §7 rows):
-- **2a.0 Upgrade note (S2).** "A release containing the usage-pause gate pauses every worker/overseer cycle on this host (fail-closed, `[PAUSED-USAGE] reading_missing` or `poller_not_installed`) until the poller below is set up and `--check` is green, or `fail_mode=open` is set. **`fail_mode=open` without a poller means no usage protection at all.**" Plus API-key-billed consumers: `fail_mode=open` is their only route (A2-15).
+- **2a.0 Upgrade note (S2).** "A release containing the usage-pause gate pauses every worker/overseer cycle on this host (fail-closed, `[PAUSED-USAGE] reading_missing` or `poller_not_installed`) until the poller below is set up and `--check` is green, or `fail_mode=open` is set. **fail_mode=open without a running poller means no quota protection**" (exact sentence, **Human rulings H-1..H-4, H-7**: H-1, ADR A4-1). Also: "each such cycle writes one `cycle-usage-unchecked` audit event". Plus API-key-billed consumers: `fail_mode=open` is their only route (A2-15).
 - **2a.1 What it is.** One poller per host, every 5 min. Reads `/usage` under your personal login over SSH loopback, never `claude-auth.env`. Every worker/overseer cycle on the host — all projects, both roles — pauses at cycle start when **session, weekly (all models), or any weekly per-model** usage is `>=` its threshold (default 90 each), or the reading is missing, stale or failed (fail-closed). Auto-resumes. Interactive sessions are never paused. Separate from `hos-suspend`.
 - **2a.2 Key.** As printed by `--print-setup` block 2.
 - **2a.3 authorized_keys.** Append the one printed line. It is **not final until a real `--check` read returns real percentages** (AC-48). If `claude` moves, regenerate (`remote-cmd`); `--check` item 2 detects drift. No `restrict`, no env unsetting (D5; the human ruled both fragile).
@@ -664,8 +677,8 @@ Outline (S1 writes all except 2a.8, which S3 adds; S2 adds 2a.0 and the §7 rows
 - **2a.6 Crontab — the one install-path line (A2-16, AC-51).** "This line is the single place the poller's install path is defined. When the path changes (e.g. #1276), change this line." Use `>`, not `>>`. One entry per host.
 - **2a.7 Verify.** First run `--check --capture-fixture …` (keep the file; attach it to #1944), then `--check` → `RESULT: PASS`. **Item 8 must be green after every upgrade of any project on the host** — it checks every scheduled `hos-cron` copy for the gate (AC-51).
 - **2a.8 (S3) Metrics export on faberix.** Root step (§5.1), symlink verification, fallback, ESM-purge note.
-- **2a.9 Fail-open (FR-67, AC-51).** "`fail_mode=open` is safe **only once alerting is live** (`contrib/monitoring/`, AC-43 and AC-44 recorded). On faberix it is forbidden until S5 is recorded (A2-18)."
-- **2a.10 Reading the state.** `cat ~/.hos/usage-pause/reading` (raw values, `poll_*` = the poller's view); `cat ~/.hos/usage-pause/last-raw` (parse-failure debugging); `[PAUSED-USAGE]` / `[USAGE-OK]` / `[USAGE-UNCHECKED]` lines in `/tmp/hos-<role>-<project>.log`; `cycle-usage-paused` audit records. No GitHub issue is ever filed (D7). **Architect round 2 (TD-O-18):** "A paused cycle never pushes audit records. They stay in the clone's `audit/log/` and are pushed by the first running cycle after the pause ends. During a long pause (e.g. waiting for the weekly reset) the cron log is the up-to-date record; the audit branch catches up on resume."
+- **2a.9 Fail-open (FR-67, AC-51).** "`fail_mode=open` is safe **only once alerting is live** (`contrib/monitoring/`, AC-43 and AC-44 recorded). On faberix it is forbidden until S5 is recorded (A2-18). fail_mode=open without a running poller means no quota protection." (exact sentence, H-1)
+- **2a.10 Reading the state.** `cat ~/.hos/usage-pause/reading` (raw values, `poll_*` = the poller's view); `cat ~/.hos/usage-pause/last-raw` (parse-failure debugging); `[PAUSED-USAGE]` / `[USAGE-OK]` / `[USAGE-UNCHECKED]` lines in `/tmp/hos-<role>-<project>.log`; `cycle-usage-paused` and (fail-open, H-1) `cycle-usage-unchecked` audit records. No GitHub issue is ever filed (D7). **Architect round 2 (TD-O-18):** "A paused cycle never pushes audit records. They stay in the clone's `audit/log/` and are pushed by the first running cycle after the pause ends. During a long pause (e.g. waiting for the weekly reset) the cron log is the up-to-date record; the audit branch catches up on resume."
 - **2a.11 (S3) History and backfill (AC-51).** Daily JSONL under `~/.hos/usage-pause/history/`, pruned every poll to `history_days`/`history_max_mb`. Backfill: §5.5 procedure, verbatim.
 - **§7 rows (S2):** `reason=poller_not_installed|reading_missing|reading_stale` → `--check`, `crontab -l`, `cat poll.last.log`; `settings_invalid:<key>` → fix the conf; `check_error` → run `python3 <bin>/lib/usage_pause.py check --state-dir ~/.hos` by hand; `read_failed:envelope_invalid` → `cat last-raw`, check the forced command (item 2).
 
@@ -680,6 +693,22 @@ Outline (S1 writes all except 2a.8, which S3 adds; S2 adds 2a.0 and the §7 rows
 5. **AC-25:** the same record shows `cost_usd=0` and `read_tokens=0` from a real read. (The alert half of AC-25 is S4: `HosClaudeUsageReadCostNonzero`/`…TokensNonzero` exist.)
 
 The record is a #1944 comment posted by the human or the orchestrating session.
+
+### 3.15 S1 trip test — Human rulings H-1..H-4, H-7 (H-7, ADR A4-7; recorded after §3.14, **before S2 is built**)
+
+This test is run by the human on faberix once the S1 exit records are posted. **No autonomous work pauses**, because no gate exists yet. Steps:
+1. **Back up the conf.** If `~/.config/hos/usage-pause.conf` exists, `cp` it to `usage-pause.conf.trip-backup`; otherwise note that it is absent.
+2. **Lower one threshold.** Read the current `session_pct` (`S`) from `~/.hos/usage-pause/reading`. Set `session_threshold` to a value ≥ 1 and below `S`; equal also trips, since the comparison is `>=`. If `S` is 0 or 1, use `weekly_threshold` against `weekly_all_pct` the same way. The conf must stay valid: all other keys unchanged, no duplicates.
+3. **Check the next cron-fired poll.** Wait for it (at most `poll_interval_seconds`), then record that the `reading` file shows:
+   - `poll_settings_status=valid`;
+   - `poll_pause_condition=1`;
+   - `poll_pause_reason=<limit> <pct>% >= <lowered threshold>`, for example `session 7% >= 5`.
+4. **Check `--check`.** Run `bin/hos-usage-poll --check` and record its `INFO 10 pause_condition=1 reason=…` line, which must name the same limit and threshold (the percentage may differ by one poll). `RESULT:` stays `PASS`.
+5. **Restore the conf.** Copy the backup back, or delete the conf if it was absent.
+6. **Check the following poll.** Record `poll_pause_condition=0` and `--check` `INFO 10 pause_condition=0`.
+7. **Post** steps 2–6 (`reading` excerpts, `--check` output, times) as one #1944 comment.
+
+**Gate:** S2 coding does not start until this comment exists (§8). The test proves, on live data, the exact evaluation S2 will consume. It does **not** replace AC-44 (§7.2 item 4), the end-to-end S5 definition of done.
 
 ---
 
@@ -735,7 +764,7 @@ Steps: `load_settings(<conf>)` → `read_reading(DIR/usage-pause/reading)` → c
   - any other pause: `$LOG_PREFIX [PAUSED-USAGE] <reason>`
   - run, `class=ok`: `$LOG_PREFIX [USAGE-OK] <reason>`
   - run, `class=failopen`: `$LOG_PREFIX [USAGE-UNCHECKED] fail_mode=open <reason>`
-- **G4. Audit.** On pause only: `_audit cycle-usage-paused "role=$ROLE" "project=$PROJECT" "cycle_id=$HOS_CYCLE_ID" "reason=<reason>" "session_pct=<…>" "weekly_all_pct=<…>" "reading_age_s=<…>" "fail_mode=<…>" "settings=<…>"` (§1.7). **Conditional on H-1:** if the human adopts the recommendation, on `class=failopen` also `_audit cycle-usage-unchecked` with the same fields. Until H-1 is ruled, S2 does not merge (A2-20: H-1 to H-4 clear before the slice each touches ships).
+- **G4. Audit.** On pause only: `_audit cycle-usage-paused "role=$ROLE" "project=$PROJECT" "cycle_id=$HOS_CYCLE_ID" "reason=<reason>" "session_pct=<…>" "weekly_all_pct=<…>" "reading_age_s=<…>" "fail_mode=<…>" "settings=<…>"` (§1.7). **Human rulings H-1..H-4, H-7 (H-1 confirmed, ADR A4-1):** on `class=failopen` (run), exactly one `_audit cycle-usage-unchecked "role=$ROLE" "project=$PROJECT" "cycle_id=$HOS_CYCLE_ID" "reason=<reason>" "session_pct=<…>" "weekly_all_pct=<…>" "reading_age_s=<…>" "fail_mode=<…>" "settings=<…>"`, then fall through. On `class=ok`, no usage event. No block, no issue, no GitHub call.
 - **G5. Act.** Pause → `exit 0` (the EXIT trap at `:332` frees the overlap lock; no `_LAST_RUN_FILE`, no wakeup consume, no audit sync). Run → fall through to `:367`.
 
 **The block contains no:** `suspend`, `hos-suspend`, `.prom`, `node_exporter`, `ssh`, `/usage`, `last-claude-output`, `gh`, `curl`, `github`, `poll_`, `HOS_CRON_MAX_SECONDS`, `mkdir`, `touch`, `rm`, `mv`, `cp`, or any `>`/`>>` redirect into a file (S2-ST1). It reads no file except through `usage_pause.py check` (FR-25, FR-28, FR-35, FR-57, AC-11, AC-24, AC-27). No in-flight bound of its own (A2-17).
@@ -745,6 +774,7 @@ Steps: `load_settings(<conf>)` → `read_reading(DIR/usage-pause/reading)` → c
 A consumer host with the gate and no poller pauses every cycle with `[PAUSED-USAGE] reading_missing` (or `poller_not_installed` when reading, conf and key are all absent). No issue, no off switch. `fail_mode=open` runs every cycle with `[USAGE-UNCHECKED] fail_mode=open reading_missing`. The release-note and upgrade-checklist text (TD-O-19):
 - `docs/UPGRADE-PR-REVIEW-CHECKLIST.md`, new section **H. Usage-pause gate (#1944)**: three checkboxes: (1) the poller is set up per CRON-SETUP §2a and `--check` is green **before** the upgrade PR merges, or every cycle pauses; (2) after merge, `--check` item 8 is green for every scheduled `hos-cron` copy; (3) API-key-billed: `fail_mode=open` is the only route and means **no usage protection**.
 - `docs/releases/v0.7.0.md`, section "Upgrade notes": the same three facts in prose.
+- **Human rulings H-1..H-4, H-7 (H-1, ADR A4-1).** Checklist item (3), the release-note paragraph, and CRON-SETUP §2a.0/§2a.9 each contain verbatim: **"fail_mode=open without a running poller means no quota protection"**. Each also states that every such cycle writes one `cycle-usage-unchecked` audit event. S2-ST9 and S2-ST10 assert the exact sentence.
 - **Architect round 2 (TD-O-19).** The target is v0.7.0: `hos_target_release=v0.7.0` in the human's `projects.conf`, no `v0.7.0` tag exists, and `docs/releases/v0.7.0.md` does not exist yet (S2 creates it). **Retarget rule:** if `v0.7.0` is tagged before S2 merges, the S2 PR moves the paragraph and S2-ST9's path to the release file for the then-current `hos_target_release`. code-reviewer checks this at S2 review time. #1944 has no milestone; the orchestrating session should put it on the v0.7.0 milestone (a tracker action, not a design change).
 
 ### 4.6 ~~`_usage_pause_visibility`, dedup, lock, transitions~~ — Removed by Revision 2 (ADR A2-5, D7)
@@ -867,11 +897,12 @@ contrib/monitoring/
     dashboards/hos-claude-usage.json               # §6.5
     provisioning/
       dashboards/hos.yaml                          # §6.2
-      alerting/hos-rules.yaml                      # §6.3 (12 rules)
+      alerting/hos-rules.yaml                      # §6.3 (13 rules; H-3 adds rule 13)
       alerting/hos-contact-point.yaml              # §6.4
   monitrix/
     hos-monitoring-sync                            # §6.6; installed BY COPY to /usr/local/bin
-    hos-grafana-alerting-reload.path               # §6.6 (H-3 recommended); installed BY COPY
+    hos-grafana-alerting-reload                    # §6.6a (H-3); installed BY COPY to /usr/local/sbin
+    hos-grafana-alerting-reload.path               # §6.6a (H-3); installed BY COPY to /etc/systemd/system
     hos-grafana-alerting-reload.service            # same
 docs/MONITORING-WORKED-EXAMPLE.md                  # §6.8 "recommended setup"
 ```
@@ -899,7 +930,7 @@ providers:
 
 `path` points into the sparse clone (A2-14); `/opt/hos-monitoring` is the worked-example location, documented in the README.
 
-### 6.3 `grafana/provisioning/alerting/hos-rules.yaml` — the 12 rules (A2-13, D17, D19)
+### 6.3 `grafana/provisioning/alerting/hos-rules.yaml` — the 13 rules (A2-13, D17, D19; rule 13 per Human rulings H-1..H-4, H-7 / ADR A4-5)
 
 **File structure (top to bottom):**
 1. **Named-values header** (comment table; TD-O-13). Every duration and every PromQL range/horizon literal in the file is listed here with its meaning:
@@ -907,7 +938,7 @@ providers:
    | Name | Value | Used by |
    |---|---|---|
    | `hos_eval_interval` | `1m` | group `interval` |
-   | `hos_for_immediate` | `0s` | PauseCondition, SettingsInvalid, ReadCostNonzero, ReadTokensNonzero |
+   | `hos_for_immediate` | `0s` | PauseCondition, SettingsInvalid, ReadCostNonzero, ReadTokensNonzero, AlertingReloadFailed |
    | `hos_for_default` | `15m` | ReadFailing, MetricsAbsent, ReadCostUnknown, HistoryWriteFailing, TextfileError |
    | `hos_for_stale` | `5m` | PollStale |
    | `hos_for_sync` | `10m` | MonitoringSyncStale |
@@ -945,6 +976,18 @@ providers:
 - `== bool 1`, `== bool 0`, `> bool 0` against boolean or must-be-zero gauges are semantics, not thresholds. Every comparison against a configurable limit is against a gauge (`staleness_seconds`, `threshold_percent`, `sync_stale_after_seconds`). **No literal `90` anywhere** (D19).
 - `1 - hos_monitoring_sync_ok` maps `ok=0` to `1`; rule 11's sum is ≥ 1 when stale or failed; `or absent(…)` fires when the sync job never wrote.
 - Rule 8 implements A2-8's "read_ok == 1 and either cost/token series absent".
+
+| # | uid / title | PromQL `A` (exact) | for | noData / execErr | sev |
+|---|---|---|---|---|---|
+| 13 | `hos-monitoring-alerting-reload-failed` / `HosMonitoringAlertingReloadFailed` | `hos_monitoring_alerting_reload_ok == bool 0` | `*hos_for_immediate` | OK / KeepLast | critical |
+
+**Human rulings H-1..H-4, H-7 (H-3, ADR A4-5).** Rule 13 fires when the last reload attempt failed and was rolled back (§6.6a). Without it, a pushed alerting change that Grafana rejected would leave `deployed_commit` advancing while monitrix runs the old rules, and nothing would signal it.
+
+**Required set (H-2 replacement control, ADR A4-3).** Rules 1–9, 11 and 13 are each the human's only signal for their failure mode, and `tests/framework/test_monitoring_required_alerts.py` asserts them by UID (§9.4a). Two rules are not required:
+- rule 10 (TextfileError) is redundant for HOS: a malformed HOS `.prom` drops its series, so rule 4 fires;
+- rule 12 is an optional early warning, and rule 1 is the signal.
+
+Both stay in the file.
 
 ### 6.4 `grafana/provisioning/alerting/hos-contact-point.yaml` (A2-13, D17)
 
@@ -993,7 +1036,7 @@ No `rate(`, `increase(`, `delta(`, `deriv(`, `sum(` over behavior series. Only `
 `*/5 * * * *  /usr/local/bin/hos-monitoring-sync > /var/lib/hos-monitoring-sync/sync.last.log 2>&1` (the interval is the worked-example value; `>` not `>>`).
 
 **Named values at the top of the script** (the only place they appear; each overridable by an env var of the same name, documented test-only):
-`HOS_SYNC_REPO_URL=https://github.com/thurlow-research/HumanOversightSystem.git`, `HOS_SYNC_CLONE_DIR=/opt/hos-monitoring`, `HOS_SYNC_STATE_DIR=/var/lib/hos-monitoring-sync`, `HOS_SYNC_SPARSE_PATH=contrib/monitoring`, `HOS_SYNC_TIMEOUT_SECONDS=120`, `HOS_SYNC_STALE_AFTER_SECONDS=1800`, `HOS_SYNC_RELOAD_SENTINEL=/var/lib/hos-monitoring-sync/reload-alerting` (empty = no reload mechanism; H-3 option 3).
+`HOS_SYNC_REPO_URL=https://github.com/thurlow-research/HumanOversightSystem.git`, `HOS_SYNC_CLONE_DIR=/opt/hos-monitoring`, `HOS_SYNC_STATE_DIR=/var/lib/hos-monitoring-sync`, `HOS_SYNC_SPARSE_PATH=contrib/monitoring`, `HOS_SYNC_TIMEOUT_SECONDS=120`, `HOS_SYNC_STALE_AFTER_SECONDS=1800`. ~~`HOS_SYNC_RELOAD_SENTINEL=…`~~ **Removed (Human rulings H-1..H-4, H-7: H-3, ADR A4-4).** The path unit watches the alerting files themselves, so no sentinel is needed.
 
 **Procedure** (`set -uo pipefail`, no `-e`):
 - **Y1.** `PATH=/usr/local/bin:/usr/bin:/bin`; `umask 022`; `export GIT_TERMINAL_PROMPT=0`.
@@ -1001,21 +1044,96 @@ No `rate(`, `increase(`, `delta(`, `deriv(`, `sum(` over behavior series. Only `
 - **Y3. Preconditions (read-only):** the clone is a git work tree; `git -C "$CLONE" config --get remote.origin.url` equals `HOS_SYNC_REPO_URL` and matches `^https://[^@]+$` (anonymous HTTPS, no credential in the URL); `git -C "$CLONE" sparse-checkout list` prints exactly `contrib/monitoring`. Any failure → `ok=0`, reason logged, go to Y7 (no mutation).
 - **Y4.** `old=$(git -C "$CLONE" rev-parse HEAD)`.
 - **Y5.** `timeout --kill-after=10 "$HOS_SYNC_TIMEOUT_SECONDS" git -c credential.helper= -C "$CLONE" pull --ff-only --quiet`. **This is the only command that mutates the clone.** Non-zero (incl. a non-fast-forward) → `ok=0`; the old content stays.
-- **Y6.** On success: `new=$(git -C "$CLONE" rev-parse HEAD)`, `ok=1`, `last_success=now`. If `old≠new` and `git -C "$CLONE" diff --name-only "$old" "$new" -- contrib/monitoring/grafana/provisioning/alerting/` is non-empty: if `HOS_SYNC_RELOAD_SENTINEL` is set, **overwrite** the sentinel in place with `"$new\n"` (open-write-close, so a `PathModified=` watch fires); else log `alerting files changed at $new — restart grafana-server manually`.
+- **Y6.** On success: `new=$(git -C "$CLONE" rev-parse HEAD)`, `ok=1`, `last_success=now`. If `old≠new` and `git -C "$CLONE" diff --name-only "$old" "$new" -- contrib/monitoring/grafana/provisioning/alerting/` is non-empty, log `alerting files changed at $new — hos-grafana-alerting-reload.path will restart grafana-server`. The sync job writes nothing else for this (H-3: the path unit is triggered by `git pull` replacing the files).
 - **Y7. Health gauges** → `$HOS_SYNC_STATE_DIR/hos_monitoring_sync.prom` via `.hos_monitoring_sync.prom.tmp` + rename (0644): `hos_monitoring_sync_ok` (1/0); `hos_monitoring_sync_last_success_timestamp_seconds` (carried from `$HOS_SYNC_STATE_DIR/state`'s `last_success_epoch=`; `0` if none); `hos_monitoring_sync_deployed_commit_info{commit="<HEAD sha>"} 1` (current HEAD, success or failure; omitted if HEAD cannot be read); `hos_monitoring_sync_stale_after_seconds` = `HOS_SYNC_STALE_AFTER_SECONDS`. All `gauge`, with HELP/TYPE. The state file is rewritten atomically.
 - **Y8.** One summary line to stdout.
 
 The gauges reach Prometheus through monitrix's own node_exporter textfile directory by the AD-10 owned-dir + symlink pattern (root step, §7.1; A2-21 #2 verifies scrape and symlink-follow).
 
-**Reload units (H-3 recommended mechanism; pending H-3).** Installed **by copy** (`install -m 0644`) into `/etc/systemd/system/`, never symlinked into the clone, so no repo content runs as root:
-- `hos-grafana-alerting-reload.path`: `[Path] PathModified=/var/lib/hos-monitoring-sync/reload-alerting`, `[Install] WantedBy=multi-user.target`.
-- `hos-grafana-alerting-reload.service`: `[Service] Type=oneshot`, `ExecStart=/bin/systemctl restart grafana-server.service`. It references no path under `/opt/hos-monitoring`.
-- **Fallback if Grafana does not follow symlinks in `provisioning/alerting/`** (§6.9): the service gains `ExecStartPre=/usr/bin/install -m 0640 -o root -g grafana <clone>/…/hos-rules.yaml <clone>/…/hos-contact-point.yaml /etc/grafana/provisioning/alerting/`. That copies data (YAML), never executes repo content.
-- **Until H-3 is ruled**, the README says "restart grafana-server after any alerting change", and AC-50's evidence includes a restart.
+### 6.6a Alerting reload: systemd path unit, service, reload script — Human rulings H-1..H-4, H-7 (H-3 confirmed, ADR A4-4, A4-5)
+
+**Ruling:** a root systemd path unit on monitrix watches the provisioned alerting files and restarts grafana-server on change. All three files are installed **by copy** by the human: the units go to `/etc/systemd/system/` (mode 0644), and the script goes to `/usr/local/sbin/` (root, 0755). None of them is ever symlinked into the clone, so a pull can never change code that runs as root.
+
+**`hos-grafana-alerting-reload.path`** (exact content):
+```
+[Unit]
+Description=HOS: watch provisioned Grafana alerting files (ADR-1944 A4-4)
+
+[Path]
+PathChanged=/opt/hos-monitoring/contrib/monitoring/grafana/provisioning/alerting/hos-rules.yaml
+PathChanged=/opt/hos-monitoring/contrib/monitoring/grafana/provisioning/alerting/hos-contact-point.yaml
+Unit=hos-grafana-alerting-reload.service
+
+[Install]
+WantedBy=multi-user.target
+```
+- **`PathChanged=`, not `PathModified=`.** `PathChanged` fires when a writer **closes** the file, and on create, move or delete in the watched path's directory. `git pull` replaces a changed file (unlink, create, write, close), so each changed file triggers once, after it is complete. `PathModified=` would also fire on every `write(2)`, which means mid-file.
+- A dashboard-only pull touches neither file and triggers nothing.
+- These two `PathChanged=` lines are the **only** clone paths in either unit (`test_reload_units_reference_no_clone_path`).
+
+**`hos-grafana-alerting-reload.service`** (exact content):
+```
+[Unit]
+Description=HOS: copy alerting provisioning and restart grafana-server (ADR-1944 A4-4)
+After=grafana-server.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/hos-grafana-alerting-reload
+TimeoutStartSec=300
+```
+- **Why `StartLimitIntervalSec=0`:** if systemd's start limit were hit, the path unit would go `failed` and silently stop watching. Flapping cannot occur, because the sync job's lock and 5-minute cadence bound triggers to one burst per pull.
+- **Triggers during a run:** a trigger that arrives while the oneshot is activating is merged into the running job by systemd.
+- **Why `TimeoutStartSec=300` is enough:** it must exceed settle plus two restart and health-check rounds: 15 + 2 × (restart + 120) s.
+
+**`hos-grafana-alerting-reload`** (bash; Linux only; `set -uo pipefail`, no `-e`). **Named values at the top** (the only place they appear; each overridable by an env var of the same name, documented as test-only):
+- `HOS_RELOAD_SOURCE_DIR=/opt/hos-monitoring/contrib/monitoring/grafana/provisioning/alerting`
+- `HOS_RELOAD_FILES="hos-rules.yaml hos-contact-point.yaml"`
+- `HOS_RELOAD_TARGET_DIR=/etc/grafana/provisioning/alerting`
+- `HOS_RELOAD_SOURCE_USER=hos-sync`
+- `HOS_RELOAD_STATE_DIR=/var/lib/hos-grafana-reload`
+- `HOS_RELOAD_SETTLE_SECONDS=15`
+- `HOS_RELOAD_MAX_BYTES=1048576`
+- `HOS_RELOAD_HEALTH_URL=http://127.0.0.1:3000/api/health`
+- `HOS_RELOAD_HEALTH_TIMEOUT_SECONDS=120`
+- `HOS_RELOAD_GRAFANA_UNIT=grafana-server.service`
+
+Procedure:
+- **R1.** `PATH=/usr/sbin:/usr/bin:/sbin:/bin`; `umask 022`. Take the mkdir lock `$HOS_RELOAD_STATE_DIR/lock` with a 600 s ceiling; if it is held, exit 0 (the running job will see the final content after its settle).
+- **R2. Settle (debounce).** `sleep "$HOS_RELOAD_SETTLE_SECONDS"`, so both files of one pull are complete.
+- **R3. Stage.** For each file, run `runuser -u "$HOS_RELOAD_SOURCE_USER" -- cat -- "$HOS_RELOAD_SOURCE_DIR/<f>"` piped through `head -c $((HOS_RELOAD_MAX_BYTES+1))` into `$HOS_RELOAD_STATE_DIR/staged/<f>`.
+  - Fail and make **no change** if any of these holds: non-zero exit, empty output, more than `HOS_RELOAD_MAX_BYTES`, or no line matching `^apiVersion: 1$`. Then go to R8 with `ok=0`.
+  - **Why read as `hos-sync`:** a symlink committed into the repo can never make root copy a file the unprivileged clone owner could not already read.
+- **R4. Idempotence.** If every staged file is byte-equal (`cmp -s`) to `$HOS_RELOAD_TARGET_DIR/<f>`, then: no restart, `ok=1`, `last_success=now`, go to R8. This covers spurious triggers and the initial run on an already-installed host.
+- **R5. Back up.** Copy each existing installed file to `$HOS_RELOAD_STATE_DIR/prev/<f>`. Record which files were absent.
+- **R6. Install.** For each file, `install -m 0640 -o root -g grafana staged/<f> "$HOS_RELOAD_TARGET_DIR/.<f>.hos-tmp"`, then `mv -f` it to `<f>`. The temp name does not end in `.yaml`/`.yml`, so Grafana's provisioning reader ignores it.
+- **R7. Restart and check.** Run `systemctl restart "$HOS_RELOAD_GRAFANA_UNIT"`. Then, until `HOS_RELOAD_HEALTH_TIMEOUT_SECONDS` elapses, poll `curl -fsS --max-time 5 "$HOS_RELOAD_HEALTH_URL"` every 5 s. Healthy means HTTP 200, a body containing `"database": "ok"`, and `systemctl is-active` = `active`.
+  - Healthy → `ok=1`, `last_success=now`.
+  - Not healthy → **roll back**:
+    1. restore each `prev/<f>` the same way as R6, and remove any file that was absent before;
+    2. restart again and run the same health loop;
+    3. set `ok=0` whatever the outcome;
+    4. log to the journal whether the rollback restart was healthy.
+- **R8. Gauges.** Write `$HOS_RELOAD_STATE_DIR/hos_grafana_alerting_reload.prom` (via `.hos_grafana_alerting_reload.prom.tmp` + rename, 0644). It holds `hos_monitoring_alerting_reload_ok` (1/0, last attempt) and `hos_monitoring_alerting_reload_last_success_timestamp_seconds` (carried from `$HOS_RELOAD_STATE_DIR/state`; `0` if none), both `gauge` with HELP/TYPE. Rewrite the state file atomically.
+- **R9.** Print one summary line. Exit 0 if `ok=1`, 1 otherwise. Because start limiting is disabled, a failed run never disables the path unit.
+- The script never runs `git`, never executes or sources anything under `/opt/hos-monitoring`, and writes only under `$HOS_RELOAD_STATE_DIR` and `$HOS_RELOAD_TARGET_DIR`.
+
+The gauge file reaches Prometheus through monitrix's textfile directory by the AD-10 owned-dir + symlink pattern. The human creates `/var/lib/hos-grafana-reload` (root, 0755) and runs `ln -sfn /var/lib/hos-grafana-reload/hos_grafana_alerting_reload.prom <monitrix textfile dir>/`.
+
+**Restart during an alert evaluation: why it is acceptable (ADR A4-4, binding).** Restarts happen only when a merged change touches the alerting files.
+1. An evaluation killed mid-flight makes no state transition, and the next evaluation runs within one `hos_eval_interval` of start.
+2. Grafana persists alert-instance state and the notification log and restores them at startup (V-R1), so `for:` timers and firing state carry over without a duplicate. If 13.2.3 does not restore them, the worst case is one duplicate email, or a delay of one `for`. That is 0 s for rules 1, 5, 6, 7 and 13. Both are safe-direction, and neither suppresses an alert.
+3. A notification in flight at stop may be lost. The alert is still firing and is re-sent at the repeat interval. Residual: a delay of at most one repeat interval, only for an alert that fires inside the restart window.
+4. Downtime is about 10–60 s. A pause that starts in the window is evaluated at the first post-start evaluation.
+5. A bad pushed file cannot leave Grafana down: R7 rolls back, and rule 13 fires through the restored Grafana.
+   - Residual: if Grafana fails even with the restored set, the fault is not the pushed change. Grafana liveness on monitrix is outside HOS (§6.8 item 11).
+
+**Copy, not symlink (H-3 consequence).** The alerting files in `/etc/grafana/provisioning/alerting/` are R6 copies, so §6.9 gap 3 no longer applies to alerting. The dashboard provider (`/etc/grafana/provisioning/dashboards/hos.yaml`) remains a symlink into the clone (§6.7).
 
 ### 6.7 `contrib/monitoring/README.md` — monitrix runbook outline
 
-1. **Purpose and boundary.** Worked example only (D17b). Never affects the pause. Not shipped by `hos_install.sh`. Protected surface after S4 (pending H-2).
+1. **Purpose and boundary.** Worked example only (D17b). Never affects the pause. Not shipped by `hos_install.sh`. **Not protected surface** (Human rulings H-1..H-4, H-7: H-2 rejected). The required alerts are guarded by `tests/framework/test_monitoring_required_alerts.py` in the PR-required suite. Removing or weakening one means editing that test, and the PR must say so.
 2. **Prerequisites.** S3 applied on faberix; `bin/hos-usage-poll --check` item 9 PASS; Prometheus job `linux_servers` already scrapes faberix (AD-11 (1), unchanged).
 3. **One-time root steps on monitrix (human):**
    - create the `hos-sync` user (no login shell, no sudo);
@@ -1023,14 +1141,22 @@ The gauges reach Prometheus through monitrix's own node_exporter textfile direct
    - as `hos-sync`: `git clone --filter=blob:none --sparse https://github.com/thurlow-research/HumanOversightSystem.git /opt/hos-monitoring` then `git -C /opt/hos-monitoring sparse-checkout set contrib/monitoring`;
    - install the sync script by copy (§6.6); add the `hos-sync` crontab line;
    - textfile gauges: `ln -sfn /var/lib/hos-monitoring-sync/hos_monitoring_sync.prom <monitrix textfile dir>/hos_monitoring_sync.prom` (after the §5.1-style probe on monitrix);
-   - Grafana provisioning symlinks: `ln -sfn /opt/hos-monitoring/contrib/monitoring/grafana/provisioning/dashboards/hos.yaml /etc/grafana/provisioning/dashboards/hos.yaml`, and the two `alerting/` files into `/etc/grafana/provisioning/alerting/`;
+   - Grafana dashboard provider symlink: `ln -sfn /opt/hos-monitoring/contrib/monitoring/grafana/provisioning/dashboards/hos.yaml /etc/grafana/provisioning/dashboards/hos.yaml`. The alerting files are **not** symlinked: the reload script copies them (§6.6a);
    - Grafana env file `/etc/default/grafana-server` (0640 root:grafana): `HOS_PROMETHEUS_DS_UID=<uid of the Prometheus datasource>`, `HOS_ALERT_EMAIL_WEBHOOK_URL=<Worker URL>`, `HOS_ALERT_EMAIL_WEBHOOK_SECRET=<shared secret>`, `HOS_ALERT_SMS_WEBHOOK_URL=https://sms-relay.example.invalid/hook`;
-   - reload units (H-3);
-   - `sudo systemctl restart grafana-server`.
-4. **Verify** (the AC-20 / AC-50 record): dashboard in folder HOS; `journalctl -u grafana-server` shows no provisioning errors; the 12 rules under Alerting → folder HOS; contact point `hos` with two integrations; Prometheus queries `hos_claude_usage_poll_timestamp_seconds{instance="faberix"}` (advancing ~5 min), `hos_claude_usage_read_ok == 1`, `hos_monitoring_sync_ok == 1`.
+   - **alerting reload: human-run install step (Human rulings H-1..H-4, H-7: H-3, §6.6a):**
+     - `sudo install -d -o root -g root -m 0755 /var/lib/hos-grafana-reload`;
+     - `sudo install -m 0755 -o root -g root contrib/monitoring/monitrix/hos-grafana-alerting-reload /usr/local/sbin/hos-grafana-alerting-reload`;
+     - `sudo install -m 0644 -o root -g root contrib/monitoring/monitrix/hos-grafana-alerting-reload.{path,service} /etc/systemd/system/`;
+     - `sudo systemctl daemon-reload`;
+     - `sudo systemctl enable --now hos-grafana-alerting-reload.path`;
+     - `sudo systemctl start hos-grafana-alerting-reload.service`. This first run copies the alerting files and restarts grafana-server; it replaces a manual restart;
+     - `ln -sfn /var/lib/hos-grafana-reload/hos_grafana_alerting_reload.prom <monitrix textfile dir>/`;
+     - verify `systemctl status hos-grafana-alerting-reload.path` is `active (waiting)`, and that `journalctl -u hos-grafana-alerting-reload.service` shows `ok=1`.
+     - Re-run the three `install` lines by hand after any HOS change to these three files. The sync never updates them, by design.
+4. **Verify** (the AC-20 / AC-50 record): dashboard in folder HOS; `journalctl -u grafana-server` shows no provisioning errors; the 13 rules under Alerting → folder HOS; `hos_monitoring_alerting_reload_ok == 1`; contact point `hos` with two integrations; Prometheus queries `hos_claude_usage_poll_timestamp_seconds{instance="faberix"}` (advancing ~5 min), `hos_claude_usage_read_ok == 1`, `hos_monitoring_sync_ok == 1`.
 5. **Test alert (AC-43):** Contact points → `hos` → Test; record the email; SMS deferred (D-5).
 6. **ESM purge note** (AD-11, verbatim sentence).
-7. **Upgrading HOS on monitrix:** nothing to do; the sync pulls. Alerting changes need the reload (H-3).
+7. **Upgrading HOS on monitrix:** nothing to do for dashboards and alert rules. The sync pulls, and the path unit restarts grafana-server when an alerting file changes (H-3). If `HosMonitoringAlertingReloadFailed` fires, the pushed alerting change was rejected and rolled back; read `journalctl -u hos-grafana-alerting-reload.service`. Changes to the reload script, its units, or the sync script need the human re-install step (item 3).
 8. **Host-specific values** (`faberix`, `/opt/hos-monitoring`, the monitrix textfile path) appear only in this README, the dashboard `instance` default, the provider `path`, and the sync script's named values.
 
 ### 6.8 `docs/MONITORING-WORKED-EXAMPLE.md` — "recommended setup" outline (A2-13, D17b, FR-63)
@@ -1041,26 +1167,36 @@ The gauges reach Prometheus through monitrix's own node_exporter textfile direct
 4. **monitrix:** `contrib/monitoring/README.md`.
 5. **Email Worker contract** (code outside HOS): accepts Grafana webhook JSON via POST, requires `Authorization: Bearer <secret>`, sends one email per notification; secret held only in the Worker and Grafana's env file.
 6. **SMS relay** (D-5 open): e.g. a Grafana-webhook → Twilio relay; placeholder until chosen.
-7. **Alert catalog:** the 12 rules, what each means, first response.
-8. **Fail-open warning (FR-67):** `fail_mode=open` is safe only once AC-43 and AC-44 are recorded.
+7. **Alert catalog:** the 13 rules, what each means, first response; which ones the required-alert guard test pins (§6.3).
+8. **Fail-open warning (FR-67):** `fail_mode=open` is safe only once AC-43 and AC-44 are recorded. fail_mode=open without a running poller means no quota protection (H-1).
 9. **Recovery:** history log and `export` backfill (§5.5).
 10. **Adapting it:** other hosts (`instance` defaults, per-host `absent` rules, TD-O-12), other alerting stacks (consume the metrics contract directly).
-11. **Known fragilities:** ESM node_exporter purge; Grafana alerting reload (H-3).
+11. **Known fragilities:** ESM node_exporter purge; Grafana alerting reload. The path unit, health check and rollback are in §6.6a, and rule 13 covers a rejected change. Grafana liveness itself is outside HOS: if Grafana is down, no alert fires at all, so add an external uptime check.
 12. **Verification records:** AC-42, AC-43, AC-44, AC-50 (§7).
+13. **Alerting reload install (H-3):** the human-run step from `contrib/monitoring/README.md` item 3, restated with the restart-acceptability summary (§6.6a).
 
 ### 6.9 Grafana verification gaps (A2-21 #1, extended; each blocks S5 only)
 
 1. Rule-level `notification_settings.receiver` in file provisioning (A2-13).
 2. YAML anchors and an unknown top-level `x-hos-named-values` key accepted (A2-13; fallback §6.3).
-3. Symlinks followed in `provisioning/alerting/` (A2-14; fallback §6.6).
+3. ~~Symlinks followed in `provisioning/alerting/`~~ **Moot for alerting** (H-3: the files are copied, §6.6a). The symlink question remains for `provisioning/dashboards/hos.yaml`.
 4. Env interpolation in contact-point settings and `datasourceUid` (A2-13).
 5. **New:** `$$` escaping in annotation templates (TD-VF-17).
 6. **New:** an empty webhook URL's effect on provisioning (§6.4); the README mandates the `.invalid` placeholder regardless.
 7. **New:** `execErrState: KeepLast` supported in 13.2.3 file provisioning; fallback `OK`.
+8. **V-R1 (H-3):** alert-instance state and the notification log are restored across a grafana-server restart in 13.2.3. If they are not, the residual is one duplicate email or a delay of one `for` (§6.6a), which is acceptable. Record which one occurred.
+9. **V-R2 (H-3):** `PathChanged=` on the clone paths fires on a real `git pull` on monitrix (AC-50 evidence: the service's journal entry after the trivial alerting change).
+10. **V-R3 (H-3):** Grafana 13.2.3 exits non-zero, or fails `/api/health`, on an invalid alerting provisioning file. Rollback depends on this. Verify once with a deliberately broken copy on monitrix, outside the sync path.
 
-### 6.10 Protected surface (A2-14, pending H-2)
+### 6.10 Alarm-integrity control — Human rulings H-1..H-4, H-7 (H-2 rejected; ADR A4-2, A4-3)
 
-S4 adds, under a new comment `# Host-monitoring alarm surfaces (#1944, ADR-1944 A2-14): the only human-facing signal of a pause`, the line `contrib/monitoring/**` to `scripts/framework/protected_surfaces.txt`; adds the same glob to `docs/AGENT-IDENTITY.md` §9.0's list; and regenerates `.github/CODEOWNERS` with `scripts/framework/regen_all.sh` (TD-VF-19). If the human declines H-2, these three edits are dropped and S4 stays MEDIUM tier with an infra-reviewer pass; nothing else changes.
+~~S4 adds `contrib/monitoring/**` to `scripts/framework/protected_surfaces.txt`, AGENT-IDENTITY §9.0, and CODEOWNERS.~~ **Withdrawn.** #1944 adds **no** protected-surface entry.
+- **Human rationale:** protected surfaces are already too broad (#1935), and human review must be restricted to what really matters.
+
+**The threat still stands.** The alert rules are the human's only signal of a pause, a broken check, or a non-zero read cost, and they could be removed by the agent they watch. **The control is now a test**, `tests/framework/test_monitoring_required_alerts.py` (§9.4a), which runs in the PR-required suite. Removing, pausing, re-routing or re-querying a required alert requires a visible edit to that file, and the overseer's normal risk review catches it.
+- **Residual, accepted by H-2:** a PR that edits both the rules and the guard test is not mechanically blocked. It is review-visible.
+
+**S4 tier and merge:** MEDIUM, with an infra-reviewer pass and no human-merge requirement. The exception: if S4's diff touches `bin/` or any path already in `protected_surfaces.txt`, the existing CODEOWNERS rule applies. S4 as specified touches only `contrib/monitoring/**`, `docs/MONITORING-WORKED-EXAMPLE.md` and `tests/framework/**`, none of which is protected. The `bin/` decision code keeps its protection (AF-2, FR-49).
 
 ---
 
@@ -1072,16 +1208,23 @@ On faberix: the S3 root step (§5.1). On monitrix: everything in §6.7 step 3. T
 
 ### 7.2 Records, in order
 
-1. **AC-50 (monitrix delivery):** `git -C /opt/hos-monitoring remote get-url origin` (https, no `@`); `git -C /opt/hos-monitoring sparse-checkout list` = `contrib/monitoring`; no deploy key on monitrix; `allowUiUpdates: false`; then a trivial pushed change under `contrib/monitoring/grafana/dashboards/` (e.g. a panel description) appears in Grafana within one sync interval + `updateIntervalSeconds`, with no UI import. Include one grafana restart for alerting (H-3 interim).
+1. **AC-50 (monitrix delivery):** `git -C /opt/hos-monitoring remote get-url origin` (https, no `@`); `git -C /opt/hos-monitoring sparse-checkout list` = `contrib/monitoring`; no deploy key on monitrix; `allowUiUpdates: false`; then a trivial pushed change under `contrib/monitoring/grafana/dashboards/` (e.g. a panel description) appears in Grafana within one sync interval + `updateIntervalSeconds`, with no UI import. **Human rulings H-1..H-4, H-7 (H-3):** next, a trivial pushed change under `contrib/monitoring/grafana/provisioning/alerting/` (e.g. one annotation description) must show:
+   - the path unit fired: a `journalctl -u hos-grafana-alerting-reload.service` entry with `ok=1` (V-R2);
+   - grafana-server restarted once;
+   - the changed text visible under Alerting;
+   - `hos_monitoring_alerting_reload_ok == 1`.
+
+   Record V-R1: whether alert state survived the restart. Record V-R3: one deliberately invalid copy, tested by hand outside the sync path, rolls back and sets `reload_ok=0`. Then restore and confirm `reload_ok=1`.
 2. **AC-42 (sync stale):** stop the sync (comment the `hos-sync` crontab line) for longer than `HOS_SYNC_STALE_AFTER_SECONDS` + `hos_for_sync`; `HosMonitoringSyncStale` fires and the email arrives; restore.
 3. **AC-43 (test alert):** Contact point `hos` → Test, with the SMS placeholder in place; the email arrives (this also proves the SMS integration does not block email). SMS half deferred to D-5.
-4. **AC-44 (definition of done; procedure pending H-4):**
+4. **AC-44 (definition of done; procedure confirmed by Human rulings H-1..H-4, H-7: H-4, ADR A4-6).** All autonomous work on faberix pauses for about 10–15 minutes, and running cycles finish first (D2). This is distinct from the S1 trip test (§3.15), which ran before any gate existed and paused nothing.
    - Preconditions: S1–S4 merged; records 1–3 done; `fail_mode=closed`; `HosClaudeUsagePauseCondition` loaded.
    - Read the current `session_pct` from `~/.hos/usage-pause/reading` (`S`). If `S = 0` no valid `session_threshold` (min 1) can trigger; wait until `S ≥ 1`, or use `weekly_threshold` against `weekly_all_pct` the same way.
    - `cp ~/.config/hos/usage-pause.conf ~/.config/hos/usage-pause.conf.ac44-backup` (if present); set `session_threshold=S` (or lower, ≥ 1).
    - Wait for the next poll (≤ `poll_interval_seconds`). Record: `reading` showing `poll_pause_condition=1` and `poll_pause_reason=session S% >= S`; a `[PAUSED-USAGE] session S% >= S` line in a `hos-cron` log; one `cycle-usage-paused` audit record; Grafana's alert-state history for `HosClaudeUsagePauseCondition`; **the email**, with its receipt time.
    - Restore the conf (or delete it if it was absent). Wait for the next poll: `poll_pause_condition=0`, the resolved notification email, and the next cycle's `[USAGE-OK]`.
-   - Every autonomous cycle on faberix skips while the threshold is lowered (intended; H-4).
+   - Every autonomous cycle on faberix skips while the threshold is lowered (intended; H-4). `hos-cron` reads the current conf every cycle (AC-23), so cycles pause at the next cycle start. The alert follows one poll (at most `poll_interval_seconds`) plus one evaluation. After restore, cycles resume at the next cycle start.
+   - SMS: record it in this same run once D-5 provides a provider. Until then the email alone satisfies AC-44.
 5. **Fail-open gate:** only after records 3 and 4 may `fail_mode=open` ever be set on faberix (A2-18).
 
 #1944 closes only when S1–S4 are merged **and** record 4 is posted.
@@ -1092,13 +1235,13 @@ On faberix: the S3 root step (§5.1). On monitrix: everything in §6.7 step 3. T
 
 | Slice | Contents | Tier | Merge | Depends on |
 |---|---|---|---|---|
-| **S1: Poller read path** | A (parse, envelope, settings incl. history keys, reading I/O, `evaluate_cycle`, poll view, `remote-cmd`, `last-raw`), B (poll P1–P7/P11/P12, `--check` items 1–8 incl. `--capture-fixture`, `--print-setup`, `remote-cmd`), D, E, F, G (capture 2, D-1 derived, synthetic empty envelopes, AC-1 shape), H, I, J (S1-ST*), K, L §2a (minus 2a.0/2a.8/2a.11), M, N. **Exit:** AC-16, AC-48, AC-49, AC-25 recorded (§3.14). | **HIGH** | HUMAN_REQUIRED (`bin/**`) | — |
-| **S2: `hos-cron` gate** | C (§4 block at `:366/:367`, sentinel, log lines, `cycle-usage-paused`; `cycle-usage-unchecked` iff H-1), A `check`, O, P, J (S2-ST*), L §2a.0 + §7 rows, Q, Q2. AC-34/AC-35 whole-cycle tests. | **HIGH** | HUMAN_REQUIRED (`bin/**`, `docs/releases/**`; FR-49) | S1 deployed, `--check` green on faberix; **H-1 ruled** |
+| **S1: Poller read path** | A (parse, envelope, settings incl. history keys, reading I/O, `evaluate_cycle`, poll view, `remote-cmd`, `last-raw`), B (poll P1–P7/P11/P12, `--check` items 1–8 **and 10** incl. `--capture-fixture`, `--print-setup`, `remote-cmd`), D, E, F, G (capture 2, D-1 derived, synthetic empty envelopes, AC-1 shape), H, I, J (S1-ST*), K, L §2a (minus 2a.0/2a.8/2a.11), M, N. **Exit:** AC-16, AC-48, AC-49, AC-25 recorded (§3.14), **then the H-7 trip test recorded (§3.15)**. | **HIGH** | HUMAN_REQUIRED (`bin/**`) | — |
+| **S2: `hos-cron` gate** | C (§4 block at `:366/:367`, sentinel, log lines, `cycle-usage-paused`, **`cycle-usage-unchecked` (H-1)**), A `check`, O, P, J (S2-ST*), L §2a.0 + §7 rows, Q, Q2 (both carrying the exact H-1 sentence). AC-34/AC-35 whole-cycle tests. | **HIGH** | HUMAN_REQUIRED (`bin/**`, `docs/releases/**`; FR-49) | S1 merged and deployed; §3.14 exit records posted; **§3.15 trip-test record posted before S2 coding starts (H-7)**. H-1 is ruled and no longer a gate. |
 | **S3: Metrics side path** | A `render_prom`/`write-prom`/history/prune/`export`, B P8–P10 + `--check` item 9 + `export`, R, golden `.prom` + history fixtures, isolation tests for all best-effort steps, L §2a.8 + §2a.11. **Precondition:** §5.1 probe recorded. | **MEDIUM** | HUMAN_REQUIRED (`bin/**`) | S1 |
-| **S4: Monitoring worked example** | S (§6.1 layout), S2', T, U (pending H-2), N. Static tests (AC-45, AC-47, never shipped, metric names match `METRIC_NAMES`, YAML/JSON structure); `integration`-marked promtool tests. | **MEDIUM** | HUMAN_REQUIRED (the PR edits `protected_surfaces.txt`) | S3 (metric names); **H-2**, **H-3** ruled |
-| **S5: Live delivery (no code)** | §7: monitrix steps, faberix S3 root step; records AC-50, AC-42, AC-43, **AC-44**. | n/a | recorded on #1944 | S4; **H-4** ruled |
+| **S4: Monitoring worked example** | S (§6.1 layout incl. §6.6a reload script and units), S2', T, **T2 (required-alert guard, H-2)**, **T3 (reload tests, H-3)**, N. Static tests (AC-45, AC-47, never shipped, metric names match `METRIC_NAMES`, YAML/JSON structure); `integration`-marked promtool tests. ~~U~~ dropped (H-2). | **MEDIUM** | **Normal: overseer may merge** after an infra-reviewer pass. HUMAN_REQUIRED only if the diff touches `bin/` or another existing protected path (H-2, ADR A4-2). | S3 (metric names). H-2/H-3 ruled; no human-ruling gate. |
+| **S5: Live delivery (no code)** | §7: monitrix steps incl. the §6.6a reload install, faberix S3 root step; records AC-50 (incl. V-R1/V-R2/V-R3), AC-42, AC-43, **AC-44** (H-4 procedure). | n/a | recorded on #1944 | S4 merged. H-4 ruled; no human-ruling gate. |
 
-**Ordering:** S1 → S2; S1 → S3 → S4 → S5. S2 may merge and run as soon as S1 is deployed and `--check` is green, before S3–S5 (A2-1; fail-closed without alerting is safe). **Definition of done:** S1–S4 merged **and** AC-44 recorded. A blocker on any slice keeps #1944 open and escalates (AD-1). `fail_mode=open` on faberix is forbidden until AC-43 and AC-44 are recorded.
+**Ordering (Human rulings H-1..H-4, H-7):** S1 is built, merged and deployed, then the §3.14 exit records, then **the §3.15 trip test (H-7)**, then S2 is built. Separately, S1 → S3 → S4 → S5. S2 may merge and run before S3–S5 (A2-1; fail-closed without alerting is safe), but S2 is never *built* before the trip-test record exists. **Build mode:** #1944 is built in the human's interactive worker session, not by autonomous pickup (`needs-ai` deliberately off). Review and merge rules are as in this table. **Definition of done:** S1–S4 merged **and** AC-44 recorded. A blocker on any slice keeps #1944 open and escalates (AD-1). `fail_mode=open` on faberix is forbidden until AC-43 and AC-44 are recorded.
 
 ---
 
@@ -1212,6 +1355,8 @@ Tests:
 - `test_check_read_failure_fails`; `test_check_nonzero_cost_fails`; `test_check_absent_tokens_fails` (TD-O-20).
 - `test_check_capture_fixture_writes_unfiltered_stdout` (byte-equal to the stub output; nothing else written) and `test_check_capture_fixture_refuses_existing_path` (AC-49).
 - `test_check_gate_sentinel_all_copies` — two copies with sentinel + lib → PASS each; `test_check_gate_missing_in_one_copy_fails_naming_path`; `test_check_gate_lib_missing_fails`; `test_check_gate_home_expansion`; `test_check_gate_relative_path_fails`; `test_check_no_hos_cron_info` (A2-4, FR-51, AC-51).
+- **Human rulings H-1..H-4, H-7 (H-7, §3.10 item 10):** `test_check_item10_over_threshold_info_pause_1` — the stub read is `session 7%`, the conf has `session_threshold=5`, and the output has `INFO 10 pause_condition=1 reason=session 7% >= 5` with `RESULT: PASS`. `test_check_item10_under_threshold_info_pause_0`. `test_check_item10_reason_equals_poll_view` — for the same read and conf, item 10's reason is byte-equal to the `poll_pause_reason` a real poll writes. `test_check_item10_invalid_settings` — `pause_condition=1 reason=settings_invalid:<key>`. `test_check_item10_skip_on_failed_read`. `test_check_item10_never_fails_result`.
+- **Trip test (H-7) is a manual record, not a pytest** (§3.15). It is the gate on starting S2.
 - `test_print_setup_never_mutates`; `test_print_setup_one_authorized_keys_line_no_restrict`; `test_print_setup_crontab_matches_interval_and_self` (FR-8, FR-66).
 - `test_remote_cmd_output` (A2-9, P8).
 
@@ -1266,11 +1411,11 @@ Tests:
 - `test_invalid_settings_pause_even_failopen_log_names_key` (AC-33, A2-3).
 - `test_one_log_line_per_cycle` — exactly one of `[PAUSED-USAGE]`/`[USAGE-OK]`/`[USAGE-UNCHECKED]` per cycle (A2-5).
 - `test_paused_cycle_audit_event_fields` — one `cycle-usage-paused` record per paused cycle, each field separate, `role` correct for overseer (A2-5, TD-VF-6, TD-VF-20).
-- `test_running_cycle_no_usage_audit_event` (A2-5).
+- `test_running_cycle_no_usage_audit_event` (A2-5; `class=ok` only — H-1).
 - `test_gate_writes_nothing_under_usage_pause` — the dir's tree hash is unchanged across paused and running cycles (A2-2, FR-26).
 - `test_consumer_no_poller_pauses_reading_missing` and `test_consumer_no_poller_failopen_runs` (AC-46, FR-65).
 - `test_gate_runs_on_bash_without_timeout` (bash 3.2 `set -u`).
-- **iff H-1 adopts the recommendation:** `test_failopen_unchecked_audit_event`.
+- **Human rulings H-1..H-4, H-7 (H-1):** `test_failopen_unchecked_audit_event` — fail-open with each of `read_failed`, `reading_missing`, `reading_stale`, and `poller_not_installed` gives exactly one `cycle-usage-unchecked` record per cycle. Its fields are separate and in the §1.7 order, with `project` and `cycle_id` present and `role` correct for the overseer, and the cycle still runs. `test_ok_run_emits_no_unchecked_event`. `test_unchecked_event_synced_same_cycle` — the record is written before the `_sync_audit_logs` stage of the same cycle (ordering recorded by the harness).
 
 **`test_usage_pause_static.py` (S2)**
 - `S2-ST1 test_gate_block_clean` — §4.4's forbidden-token list (FR-25, FR-28, FR-57, AC-11, AC-27).
@@ -1281,8 +1426,8 @@ Tests:
 - `S2-ST6 test_gate_never_reads_max_seconds` — no `HOS_CRON_MAX_SECONDS` in the block or the module (A2-17).
 - `S2-ST7 test_sentinel_unique_and_second_line` (A2-4).
 - `S2-ST8 test_check_never_reads_poll_keys` — no element of `CHECK_READ_KEYS` starts with `poll_`; the AST of `evaluate_cycle` and the `check` command handler contains no string constant starting with `poll_`; the gate block contains no `poll_` (A2-3).
-- `S2-ST9 test_upgrade_checklist_and_release_note_present` — `docs/UPGRADE-PR-REVIEW-CHECKLIST.md` §H and `docs/releases/v0.7.0.md` "Upgrade notes" carry the setup step, the "upgrade stops autonomous work" fact, and the API-key fail-open statement (AC-46, FR-65).
-- `S2-ST10 test_runbook_content` — CRON-SETUP §2a has the fail-open-needs-alerting sentence, the every-copy check, the single install-path line, and (after S3) the backfill procedure (AC-51).
+- `S2-ST9 test_upgrade_checklist_and_release_note_present` — `docs/UPGRADE-PR-REVIEW-CHECKLIST.md` §H and `docs/releases/v0.7.0.md` "Upgrade notes" carry the setup step, the "upgrade stops autonomous work" fact, and the API-key fail-open statement (AC-46, FR-65). **H-1:** each also contains the exact sentence `fail_mode=open without a running poller means no quota protection`.
+- `S2-ST10 test_runbook_content` — CRON-SETUP §2a has the fail-open-needs-alerting sentence, the exact H-1 sentence in §2a.0 and §2a.9, the every-copy check, the single install-path line, and (after S3) the backfill procedure (AC-51).
 
 ### 9.3 S3 tests
 
@@ -1318,7 +1463,7 @@ Tests:
 
 ### 9.4 S4 tests — `tests/framework/test_contrib_monitoring.py`, `tests/framework/test_monitoring_sync.py`
 
-- `test_rules_yaml_parses_one_group_twelve_rules` — exact uids and titles (FR-62, AC-47).
+- `test_rules_yaml_parses_one_group_thirteen_rules` — exact uids and titles, rule 13 included (FR-62, AC-47; H-3).
 - `test_every_rule_receiver_hos_no_policy_tree` (AC-47, A2-13).
 - `test_every_rule_condition_c_gt_0_and_bool_expr` (§6.3).
 - `test_rule_exprs_exact` — each `expr` equals §6.3.
@@ -1341,10 +1486,36 @@ Tests:
 - `test_behaviors_panel_three_unstacked_text` — panel and every override `stacking.mode == "none"`, `fillOpacity == 0`, exact description (AF-6).
 - `test_no_rate_increase_delta` (FR-43).
 - `test_contrib_never_shipped` — no `framework_consumer_files.txt` entry starts with `contrib/`; `hos_install.sh` has no `contrib` token (AC-47, FR-58).
-- `test_reload_units_reference_no_clone_path` (A2-14).
-- `test_protected_surface_entry` (iff H-2): `contrib/monitoring/**` in `protected_surfaces.txt`, AGENT-IDENTITY §9.0, CODEOWNERS (`test_codeowners_current` stays green).
+- `test_reload_units_reference_no_clone_path` (A2-14; H-3) — the only clone paths in either unit are the path unit's two `PathChanged=` lines; the service's `ExecStart` is `/usr/local/sbin/hos-grafana-alerting-reload`.
+- ~~`test_protected_surface_entry`~~ **Removed** (H-2 rejected). In its place: `test_contrib_monitoring_not_protected` — no `protected_surfaces.txt` line matches `contrib/` (this records the H-2 ruling, so a later re-add is a visible change).
 - `test_host_values_only_where_allowed` (§6.7 item 8).
-- **`test_monitoring_sync.py`** (local bare repo + clone, `file://` URL via the test-only override, `HOS_SYNC_*` overrides into a temp dir): `test_ff_pull_updates_and_gauges` (ok 1, commit info = new HEAD, stale_after); `test_non_ff_refused_content_kept` (ok 0, old HEAD kept, last_success carried); `test_alerting_change_writes_sentinel` / `test_dashboard_only_change_no_sentinel`; `test_wrong_remote_or_sparse_refuses_without_mutation`; `test_credential_in_url_refused`; `test_first_run_last_success_zero`; `test_only_pull_mutates` (static: no `git` subcommand other than `pull`, `rev-parse`, `diff`, `config --get`, `sparse-checkout list`) (AC-42 structure, AC-50, FR-59).
+- **`test_monitoring_sync.py`** (local bare repo + clone, `file://` URL via the test-only override, `HOS_SYNC_*` overrides into a temp dir): `test_ff_pull_updates_and_gauges` (ok 1, commit info = new HEAD, stale_after); `test_non_ff_refused_content_kept` (ok 0, old HEAD kept, last_success carried); `test_alerting_change_logged_no_sentinel` (H-3: no sentinel or other file written for reload) / `test_dashboard_only_change_no_reload_log`; `test_wrong_remote_or_sparse_refuses_without_mutation`; `test_credential_in_url_refused`; `test_first_run_last_success_zero`; `test_only_pull_mutates` (static: no `git` subcommand other than `pull`, `rev-parse`, `diff`, `config --get`, `sparse-checkout list`) (AC-42 structure, AC-50, FR-59).
+
+### 9.4a Required-alert guard — `tests/framework/test_monitoring_required_alerts.py` — Human rulings H-1..H-4, H-7 (H-2 replacement control, ADR A4-3)
+
+This file is in the PR-required suite (`scripts/framework/run_tests_inner_loop.sh`, run by `.github/workflows/tests.yml`).
+- **No markers.** It has no `slow`, `integration`, `skip` or `xfail` marker. A missing rules or contact-point file **fails**; it does not skip. PyYAML is a pinned requirement, so an import failure is an error.
+- **Docstring.** It cites H-2, says that removing or weakening an entry changes the human's alerting coverage, and says the PR must say so.
+- **`REQUIRED_ALERTS`** is a literal dict in this file, never imported from `contrib/`. It maps each UID to its metric anchor (§6.3 required set; ADR A4-3 table): `hos-pause-condition`, `hos-read-failing`, `hos-poll-stale`, `hos-metrics-absent`, `hos-settings-invalid`, `hos-read-cost-nonzero`, `hos-read-tokens-nonzero`, `hos-read-cost-unknown`, `hos-history-write-failing`, `hos-monitoring-sync-stale`, `hos-monitoring-alerting-reload-failed`.
+
+Tests:
+- `test_required_alert_rules_present_by_uid` — each required UID appears exactly once in `hos-rules.yaml`.
+- `test_required_alert_rules_enabled_and_routed` — each required rule has `isPaused: false`, `notification_settings.receiver == "hos"`, and `condition == "C"`. Pausing or re-routing counts as removal.
+- `test_required_alert_rules_query_their_metric` — the refId `A` `expr` contains the anchor metric name. Exact expressions stay pinned by `test_rule_exprs_exact`.
+- `test_contact_point_has_email_and_sms_integrations` — contact point `hos` has `hos-email-webhook` (`type: webhook`, `url: ${HOS_ALERT_EMAIL_WEBHOOK_URL}`, `authorization_scheme: Bearer`) **and** `hos-sms-webhook` (`type: webhook`, `url: ${HOS_ALERT_SMS_WEBHOOK_URL}`).
+
+### 9.4b Reload script and units — `tests/framework/test_grafana_alerting_reload.py` — Human rulings H-1..H-4, H-7 (H-3, §6.6a)
+
+Runs the real script with `HOS_RELOAD_*` overrides into a temp dir. `runuser`, `systemctl` and `curl` are PATH stubs that record their argv. Settle is 0 in tests.
+- `test_unchanged_files_no_restart` (R4) and `test_changed_files_installed_and_restarted`, which checks mode 0640, the temp-name-then-rename install, and exactly one restart.
+- `test_source_read_as_source_user` — every source read goes through `runuser -u hos-sync -- cat --`, and nothing reads the source directly as root.
+- `test_oversize_or_empty_or_no_apiversion_refused_no_change`.
+- `test_health_fail_rolls_back_and_ok_0` — the previous copies are restored byte-equal, two restarts occur, and `reload_ok 0` is written.
+- `test_rollback_removes_previously_absent_file`.
+- `test_gauges_atomic_and_last_success_carried`.
+- `test_lock_held_exits_0_no_change`.
+- `test_never_runs_git_or_clone_code` (static).
+- `test_path_unit_pathchanged_exact_two_files`, `test_service_oneshot_start_limit_disabled`, and `test_named_values_only_at_top` (static).
 
 **AC-20, AC-42, AC-43, AC-44, AC-50 live halves are S5 records (§7).**
 
@@ -1375,7 +1546,7 @@ Tests:
 | FR-19 | §3.6 R9, §1.2 | `test_exact_90_is_reached`, `test_reason_order_and_join`, `test_model_90_pauses_reason_exact` |
 | FR-20 | §3.3 | `test_window_length_never_parsed` |
 | FR-21 | §3.6 R12 | `test_failure_closed_pauses`, `test_empty_session_reading_pauses_closed` |
-| FR-22 | §3.6 R13, §4.4 G3 | `test_failure_open_runs_unchecked`, `test_failopen_failure_runs_unchecked_line` |
+| FR-22 | §3.6 R13, §4.4 G3, G4 (H-1) | `test_failure_open_runs_unchecked`, `test_failopen_failure_runs_unchecked_line`, `test_failopen_unchecked_audit_event` (H-1) |
 | FR-23 | §3.6 R10 | `test_resume_all_below`, `test_auto_resume_next_cycle` |
 | FR-24 | §3.7 | `test_poll_runs_while_project_suspended`, S1-ST2 |
 | FR-25 | §4.4 | `test_human_suspend_marker_untouched`, S2-ST1 |
@@ -1402,7 +1573,7 @@ Tests:
 | FR-46 | §6.5 | `test_four_panels_exact_exprs` |
 | FR-47 | §3.11, §3.13, §2 E | `test_print_setup_never_mutates` |
 | FR-48 | §3.10 | `test_check_*` |
-| FR-49 | §8 tiers/merge | CODEOWNERS (`bin/**`) |
+| FR-49 | §8 tiers/merge, §6.10 | CODEOWNERS (`bin/**`); `contrib/monitoring/**` deliberately not protected (H-2): `test_contrib_monitoring_not_protected`, §9.4a guard |
 | FR-50 | §3.7, §3.11 | `test_poll_*`, `test_print_setup_crontab_matches_interval_and_self` |
 | FR-51 | §4, §3.10 item 8 | `test_global_pause_all_projects_both_roles`, `test_human_suspend_marker_untouched`, `test_check_gate_*` |
 | FR-52 | §5.4 | `test_usage_pause_history.py` |
@@ -1411,14 +1582,14 @@ Tests:
 | FR-55 | §1.6, §3.7 P11 | `test_last_raw_success_then_failure` |
 | FR-56 | §3.2, §5.2 #11–12 | `test_capture2_envelope_ok_reads_three_fields`, `test_cost_recorded_on_failed_read` |
 | FR-57 | §4.4, §4.6 (removed) | `test_paused_cycles_make_zero_network_calls`, S1-ST12, S2-ST1 |
-| FR-58 | §6.2–§6.5 | `test_provider_yaml`, `test_contrib_never_shipped`, AC-50 record |
+| FR-58 | §6.2–§6.5, §6.6a (H-3 reload) | `test_provider_yaml`, `test_contrib_never_shipped`, `test_grafana_alerting_reload.py`, AC-50 record (incl. V-R1–V-R3); requirement text to be corrected by pm-agent (ADR A4-9 item 8) |
 | FR-59 | §6.6 | `test_monitoring_sync.py`, AC-50 record |
-| FR-60 | §6.1, §6.3 | `test_rules_yaml_parses_one_group_twelve_rules` |
+| FR-60 | §6.1, §6.3 | `test_rules_yaml_parses_one_group_thirteen_rules` |
 | FR-61 | §6.4 | `test_contact_point_two_webhooks_env_refs`, `test_no_real_endpoints_or_secrets`, AC-43 record |
-| FR-62 | §6.3 | `test_rules_yaml_parses_one_group_twelve_rules`, `test_rule_exprs_exact` |
+| FR-62 | §6.3, §9.4a (H-2) | `test_rules_yaml_parses_one_group_thirteen_rules`, `test_rule_exprs_exact`, `test_required_alert_rules_present_by_uid`, `test_required_alert_rules_enabled_and_routed`, `test_required_alert_rules_query_their_metric` |
 | FR-63 | §6.8, §6.7 | doc review (S4) |
 | FR-64 | §1.8 block, §6.3, §6.5 | S1-ST10, `test_no_literal_threshold_in_rules`, `test_no_threshold_steps_with_values` |
-| FR-65 | §4.5 | `test_consumer_no_poller_*`, S2-ST9 |
+| FR-65 | §4.5 (incl. H-1 sentence) | `test_consumer_no_poller_*`, S2-ST9 (exact H-1 sentence) |
 | FR-66 | §3.7 P2, §3.11 block 5 | S1-ST11, `test_check_crontab_path_not_self_fails` |
 | FR-67 | §3.13 2a.9, §7.2 item 5 | S2-ST10 |
 | AC-1 | §3.3, §3.6, §5.2 | `test_ac1_shape_success_no_breakdown`, `test_poll_success_writes_reading`, `test_under_threshold_runs_usage_ok_line` |
@@ -1429,7 +1600,7 @@ Tests:
 | AC-6 | §3.4, §3.7 P5 | `test_poll_ssh_255_ssh_failed`, `test_poll_key_missing_ssh_failed` |
 | AC-7 | §3.1, §3.8 | `test_poll_timeout` (slow), `test_read_usage_timeout_kills_process_group` |
 | AC-8 | §3.6 | `test_each_unusable_reason_distinct`, `test_unusable_reasons_distinct` |
-| AC-9 | §3.6 R13, §5.2 | `test_failopen_failure_runs_unchecked_line`, `test_failure_render_absent_values`, `test_paused_cycles_make_zero_network_calls` |
+| AC-9 | §3.6 R13, §4.4 G4, §5.2 | `test_failopen_failure_runs_unchecked_line`, `test_failopen_unchecked_audit_event` (H-1), `test_failure_render_absent_values`, `test_paused_cycles_make_zero_network_calls` |
 | AC-10 | §3.6 R10 | `test_auto_resume_next_cycle` |
 | AC-11 | §4.1, §4.4 | `test_human_suspend_marker_untouched` |
 | AC-12 | §3.7 | `test_poll_runs_while_project_suspended` |
@@ -1445,7 +1616,7 @@ Tests:
 | AC-22 | §3.10 | `test_check_idempotent_writes_nothing`, `test_check_missing_key_fails_nonzero` |
 | AC-23 | §4.3 (current conf) | `test_threshold_80`, `test_check_uses_current_conf_not_poll_view`, `test_threshold_80_applies_without_new_poll_all_projects` |
 | AC-24 | §4.4 | `test_transcript_wording_never_pauses` |
-| AC-25 | §3.14 item 5, §6.3 rules 6–7 | AC-25 record + `test_rules_yaml_parses_one_group_twelve_rules` |
+| AC-25 | §3.14 item 5, §6.3 rules 6–7 | AC-25 record + `test_rules_yaml_parses_one_group_thirteen_rules` |
 | AC-26 | §3.12 | full PR suite incl. T4.1/T4.1b/T4.2 |
 | AC-27 | §3.7, §4.4 | `test_poll_runs_while_project_suspended`, S1-ST2, S2-ST1, T4.1b |
 | AC-28 | §3.6 | `test_exact_90_is_reached`, `test_session_90_pauses_before_anything` |
@@ -1464,15 +1635,16 @@ Tests:
 | AC-41 | §6.3 rules 6, 7 | `test_rule_exprs_exact` (separate rules; `> bool 0` is 0 at cost 0) |
 | AC-42 | §6.3 rule 11, §6.6, §7.2 item 2 | `test_monitoring_sync.py`, S5 record |
 | AC-43 | §6.4, §7.2 item 3 | S5 record |
-| AC-44 | §7.2 item 4 | S5 record (definition of done; pending H-4) |
+| AC-44 | §7.2 item 4 | S5 record (definition of done; procedure confirmed, H-4) |
 | AC-45 | §1.8, §6.3, §6.5 | S1-ST10, `test_no_literal_threshold_in_rules`, `test_named_values_header_covers_every_duration`, `test_no_threshold_steps_with_values` |
-| AC-46 | §4.5 | `test_consumer_no_poller_pauses_reading_missing`, `test_consumer_no_poller_failopen_runs`, S2-ST9 |
-| AC-47 | §6.3, §6.4 | `test_every_rule_receiver_hos_no_policy_tree`, `test_no_real_endpoints_or_secrets`, `test_contrib_never_shipped` |
+| AC-46 | §4.5 | `test_consumer_no_poller_pauses_reading_missing`, `test_consumer_no_poller_failopen_runs`, `test_failopen_unchecked_audit_event` (H-1), S2-ST9 |
+| AC-47 | §6.3, §6.4, §9.4a (H-2) | `test_required_alert_rules_*`, `test_contact_point_has_email_and_sms_integrations` (PR-required guard), `test_every_rule_receiver_hos_no_policy_tree`, `test_no_real_endpoints_or_secrets`, `test_contrib_never_shipped` |
 | AC-48 | §3.14 item 2 | S1 record |
 | AC-49 | §3.10, §1.9.2 | `test_check_capture_fixture_*`, `test_extra_fields_ignored`; "removed" half runs once the full envelope is committed (S1 exit + later PR) |
 | AC-50 | §6.2, §6.6, §7.2 item 1 | `test_provider_yaml`, `test_monitoring_sync.py`, S5 record |
 | AC-51 | §3.13 | S2-ST10 |
 | AC-52 | §5.2 #17, #21 | `test_pause_condition_from_poll_view`, `test_poll_view_equals_cycle_rule`, `test_never_succeeded_last_success_zero` |
+| AC-(H-7) *(pm-agent to number; ADR A4-9 item 9)* | §3.10 item 10, §3.15, §8 | `test_check_item10_*`; S1 trip-test record on #1944 (gates S2 build) |
 | AS-1 / AS-2 / AS-3 | superseded by D1 / confirmed by D2 / superseded by D3, D7 | `test_model_90_*` / `test_running_cycle_not_killed` / — |
 | D-1 / D-2 / D-3 / D-4 / D-5 / D-6 | §1.9.1 / no fallback / §5.1 / §3.10, AC-49 / §6.4 placeholder / §6.7 env file | fixtures / AC-21 test / §5.1 record / S1 exit / AC-43 deferred / S5 |
 
@@ -1507,7 +1679,7 @@ Tests:
 - **TD-O-21 (additive).** The `cycle-usage-paused` event also carries `project` and `cycle_id`, since the pause is global and each event is per cycle. *Interim:* binds.
 - **TD-O-22 (AC-35 interpretation).** On running cycles (fail-open, resume) `hos-cron`'s ordinary flow makes GitHub calls by design. AC-35 is therefore asserted as "zero calls of any kind on paused cycles" plus "the gate adds zero calls on running cycles" (call list identical to a plain run). *Interim:* binds.
 
-**No A2 decision is contradictory.** Two are unimplementable as literally worded (TD-O-12, TD-O-13), and each has a faithful interim. S2 is additionally gated on H-1 by A2-20 (§4.4 G4).
+**No A2 decision is contradictory.** Two are unimplementable as literally worded (TD-O-12, TD-O-13), and each has a faithful interim. S2 is additionally gated on H-1 by A2-20 (§4.4 G4). *(Superseded: H-1 is ruled; S2 is now gated on the H-7 trip test, §3.15.)*
 
 ### 11.3 Architect round 2 — rulings (2026-10-03, binding)
 
@@ -1547,6 +1719,18 @@ Tests:
 
 ---
 
+### 11.4 Human rulings H-1..H-4, H-7 — applied (2026-10-03, ADR Amendment 4)
+
+| Ruling | Effect on this TD | Sections |
+|---|---|---|
+| H-1 confirmed | `cycle-usage-unchecked` on every `class=failopen` cycle (no block, no issue). The exact sentence "fail_mode=open without a running poller means no quota protection" appears in the release note, checklist §H, and CRON-SETUP §2a.0/§2a.9. | §1.7, §3.13, §4.4 G4, §4.5, §6.8, §9.2, §10 |
+| H-2 rejected | No protected-surface entry. The required-alert guard test is in the PR-required suite. S4 is MEDIUM with normal merge. | §0 TD-VF-19, §2, §6.3, §6.7, §6.10, §8, §9.4, §9.4a, §10, Human Review |
+| H-3 confirmed | Path unit (`PathChanged=` on the two clone alerting files), oneshot service (start limit off), and reload script (settle, stage as `hos-sync`, idempotence, copy, restart, health check, rollback, gauges). Rule 13. Alerting files are copied, not symlinked. Sync sentinel removed. Restart acceptability analysis. V-R1–V-R3. | §6.1, §6.3, §6.6, §6.6a, §6.7, §6.8, §6.9, §7.2, §9.4, §9.4b |
+| H-4 confirmed | AC-44 procedure final; about 10–15 min of paused autonomous work; running cycles finish first. | §7.2 item 4 |
+| H-7 new | S1 trip test (§3.15) gates S2 build. New `--check` item 10 (INFO, never FAIL). | §3.10, §3.15, §8, §9.1, §10 |
+
+**For `technical-design` (ADR A4-10):** do one consistency pass over the sections tagged "Human rulings H-1..H-4, H-7", before the S1 PR (item 10) and before S4 coding (§6.6a, §9.4a/b). This is not a new critique round. The round count stays at 2 of 5.
+
 ## 12. Escalations — Revision 2
 
 - **ESC-T1** (cross-clone `bin/` writable): **accepted risk** (D14, A2-16). No issue.
@@ -1556,51 +1740,30 @@ Tests:
 
 ---
 
-## 13. Human confirmation required (ADR A2-20, carried forward unchanged)
+## 13. Human confirmation required — Human rulings H-1..H-4, H-7 (ADR A4-8; supersedes the A2-20 carry-forward)
 
-**Resolved by D1-D19**, so these are no longer open:
-- §5.1 AS-1: superseded by D1, three triggers.
-- §5.2 AS-2: confirmed, D2.
-- §5.3 AS-3 + derived dead-poller issue: superseded by D3/D7, alerting.
-- §5.4 Q11: confirmed, D4, minus issue filing.
-- §5.5 Q12: D5, forced command without `restrict`.
-- §5.6 Q5: D6, one reading file.
-- §5.7 Q15: moot, D7.
-- §5.8 FR-42/FR-44 interpretations: D8.
-- §5.9 Grafana provisioning: D9.
-- §5.10 ESC-1: D10 (a).
-- A1 §12 FR-11 narrowing: D12.
-- A1 §13 AC-25: D13.
-- A1 §14 cross-clone `denyWrite`: D14, accepted.
-- A1 §15 and §16: filed as #1946.
+**Resolved by D1–D19:** as listed in ADR A2-20 (AS-1/2/3, Q11, Q12, Q5, Q15, FR-42/44, Grafana provisioning, ESC-1, FR-11, AC-25, cross-clone `denyWrite`, #1946).
 
-**Decided here as design-level (P-rulings), for the human's awareness. No action needed unless the human disagrees:**
-- P1: `hos-cron` decides. The reading file holds the raw reading plus an informational `poll_*` view, which is a deliberate partial departure from the default (A2-3).
-- P2: **overridden.** There is one audit event per paused cycle, not per transition, because a stateless gate cannot detect transitions (A2-5).
-- P3: confirmed (A2-10).
-- P4: exactly `from=` + `command=`. The residual is accepted, and the detector is the real read (A2-9).
-- P5 (A2-8).
-- P6 (A2-11).
-- P8: host-specific path from `remote-cmd` (A2-9).
-- P9 (A2-17).
+**Resolved by human ruling, interactive session 2026-10-03:**
+- **H-1 confirmed:** per-cycle `cycle-usage-unchecked` plus the exact release-note sentence; no block, no issue (§4.4 G4, §4.5).
+- **H-2 rejected:** no protected-surface entry. The replacement control is the required-alert guard test (§6.10, §9.4a).
+- **H-3 confirmed:** root systemd path unit restarting grafana-server (§6.6a).
+- **H-4 confirmed:** the AC-44 procedure (§7.2 item 4).
+- **H-7 (new):** the S1 trip test gates S2 (§3.15, §8).
 
-**Still requiring the human:**
-- **H-1 (P7, product boundary). A consumer running `fail_mode=open` with no poller and no alerting is silent.** Every cycle runs with no usage protection, and the only trace is a `[USAGE-UNCHECKED]` line in a cron log nobody reads. D10 allows `fail_mode=open` as the way past the no-poller pause, and D17b makes alerting optional, so nothing in the rulings prevents this. **Architect recommendation:** keep D10 as ruled. Do **not** narrow fail-open to exclude a missing reading file, because that would leave API-key-billed consumers, who have no `/usage`, permanently paused with no lever. Add two things: (i) one `cycle-usage-unchecked` audit event per fail-open cycle that runs without a fresh successful reading, so the consumer's audit trail records every unwatched cycle; and (ii) release-note and runbook text stating plainly that "fail-open without a poller = no usage protection". The alternative is to require a separate explicit acknowledgement key (e.g. `usage_check=unavailable_acknowledged`) before fail-open applies to a *missing* reading file. That is stricter, but it adds a setting D10 did not ask for. **Human chooses: recommendation, the alternative, or accept as-is.**
-- **H-2 (new, governance): `contrib/monitoring/**` → protected surface** (A2-14). This is binding as a stricter control, but it extends the protected-surface list and so needs the human's approval on the S4 PR. Confirm that this is wanted rather than kept as normal-tier.
-- **H-3 (new, operational obligation on monitrix): the alerting-reload mechanism** (A2-14). Grafana does not hot-reload alert rules or contact points, contrary to D9's premise, which holds for dashboards only. Options:
-  - **recommended:** a root `systemd .path` unit that restarts `grafana-server` on a sentinel the sync job touches;
-  - a Grafana service-account token for the admin reload API (a new credential on monitrix);
-  - a manual restart after each alerting change.
-- **H-4 (new, AC-44 procedure).** The definition-of-done run lowers `session_threshold` to force a real pause, which pauses all autonomous work on the host for one or more poll intervals. Confirm the procedure, or name another way to produce a real `pause_condition=1`.
-- **H-5 (new, informational, safe direction).** Under D4, an invalid `history_days`/`history_max_mb` pauses all autonomous work, just as a bad threshold does. Recorded so it is not a surprise. A ruling is needed only if the human wants operational keys exempted, which would loosen D4.
-- **H-6 (carried human actions, not confirmations):**
-  - faberix S1: keypair, the `remote-cmd` `authorized_keys` line, `known_hosts`, the poller crontab line, `--check --capture-fixture`;
-  - faberix S3: the `/var/lib/hos-usage` + symlink root step;
-  - monitrix S5: the `hos-sync` user, clone, provisioning symlinks, Grafana env file with the Worker URL/secret, the textfile symlink, and the reload mechanism (H-3);
-  - removing the leftover `/tmp/diagnose_claude_usage_tty.sh` crontab entry. It is not part of the design, and it appends forever to `/tmp/claude_usage_diag.log`.
-- **Still open, not blocking (from requirements §6):** Q13 (reset text) stays as AD-3 had it, reading file only with no gauge. Q14 (runbook location) stays at CRON-SETUP §2a. Q18 is moot until D-2.
+**P-rulings (design-level, for awareness):** P1–P6, P8, P9, unchanged (ADR A2-20).
 
-*(TD note, not part of the carried list: TD-VF-16 observed the diagnose entry is currently commented out at crontab line 76; H-6's removal still stands as written.)*
+**Remaining. None blocks design or coding:**
+- **H-5 (informational, safe direction).** Under D4, an invalid `history_days`/`history_max_mb` pauses all autonomous work. A ruling is needed only if the human wants those keys exempted, which would loosen D4.
+- **H-6 (human actions, not confirmations):**
+  - faberix S1: keypair, `remote-cmd` `authorized_keys` line, `known_hosts`, poller crontab line, `--check --capture-fixture`;
+  - faberix after S1 exit: **the H-7 trip test (§3.15)**;
+  - faberix S3: `/var/lib/hos-usage` + symlink;
+  - monitrix S5: `hos-sync` user, clone, sync script, dashboard provider symlink, Grafana env file, sync and reload textfile symlinks, **the reload script and both units (§6.7 item 3)**, then the V-R1–V-R3 checks;
+  - the AC-44 run;
+  - removing the leftover `/tmp/diagnose_claude_usage_tty.sh` crontab entry. TD-VF-16 found it commented out at crontab line 76.
+- **Dependencies, not confirmations:** D-5 (SMS provider) defers only the SMS half of AC-43/AC-44. Q13, Q14 and Q18 are unchanged and not blocking.
+- **Orchestrator actions (not human rulings):** put #1944 on the v0.7.0 milestone (TD-O-19); hand the ADR A4-9 requirement rewording to pm-agent.
 
 ---
 
@@ -1619,11 +1782,12 @@ Tests:
 - Every decision-path failure, including the helper crashing, resolves to a *named* pause (`check_error` ignores `fail_mode`).
 - The gate runs before any network call or Claude process, writes nothing, and holds no state, so a paused cycle cannot leak or corrupt anything.
 - A failed read can never record 0% anywhere (§1.3, §5.2). Cost 0 never establishes success.
-- With issues gone, the alert rules are the only human-facing signal. They compare only against exported gauges, carry no literal threshold, and become protected surface (pending H-2).
+- With issues gone, the alert rules are the only human-facing signal. They compare only against exported gauges and carry no literal threshold. Per H-2 they are not protected surface: a PR-required guard test pins every required alert by UID, plus the contact point's email and SMS integrations, so removing one is a visible test edit (§6.10, §9.4a). A rejected alerting change rolls back and fires rule 13 (H-3).
+- Fail-open is never silent in the audit trail: every unchecked cycle writes `cycle-usage-unchecked` (H-1).
 - A forced command that goes missing yields `envelope_invalid`, never a silent success (client sends no command).
 
 **CONFIDENCE: HIGH** on §0–§4 (anchors re-read at `0603100b9`; regexes executed against both real captures; envelope fields taken only from capture 2). **MEDIUM-HIGH** on §5 (symlink probe pending; fallback verified available). **MEDIUM** on §6–§7 until the §6.9 Grafana gaps are checked on monitrix; two A2-13 details were unimplementable as worded and carry interims (TD-O-12, TD-O-13).
 
-**BLAST RADIUS:** `bin/hos-cron` cycle start (both roles, every project, every consumer on upgrade); new `bin/hos-usage-poll` and `bin/lib/usage_pause.py`; `framework_consumer_files.txt`; `hos_install.sh` summary text; T4.1 ledger; the shared `CronEnv` fixture; `~/.ssh/authorized_keys`; the user crontab; `~/.hos/usage-pause/` (incl. `history/`, `last-raw`); `~/.config/hos/usage-pause.conf`; `/var/lib/hos-usage` + one symlink; monitrix `/opt/hos-monitoring`, a `hos-sync` user, `/usr/local/bin/hos-monitoring-sync`, Grafana provisioning and env file, two systemd units; `protected_surfaces.txt`, AGENT-IDENTITY §9.0, CODEOWNERS; `docs/releases/v0.7.0.md`.
+**BLAST RADIUS:** `bin/hos-cron` cycle start (both roles, every project, every consumer on upgrade); new `bin/hos-usage-poll` and `bin/lib/usage_pause.py`; `framework_consumer_files.txt`; `hos_install.sh` summary text; T4.1 ledger; the shared `CronEnv` fixture; `~/.ssh/authorized_keys`; the user crontab; `~/.hos/usage-pause/` (incl. `history/`, `last-raw`); `~/.config/hos/usage-pause.conf`; `/var/lib/hos-usage` + one symlink; monitrix `/opt/hos-monitoring`, a `hos-sync` user, `/usr/local/bin/hos-monitoring-sync`, Grafana provisioning and env file, two systemd units, `/usr/local/sbin/hos-grafana-alerting-reload`, `/var/lib/hos-grafana-reload`; `docs/releases/v0.7.0.md`. (`protected_surfaces.txt`, AGENT-IDENTITY §9.0 and CODEOWNERS are no longer touched: H-2.)
 
-**Change classification: STRUCTURAL.** The structure was set by the human's rulings (D1–D19), which pre-authorize it. The design-level additions here are `additive` or `clarifying` (TD-O-14 to TD-O-22) or unimplementable-as-worded interims (TD-O-12, TD-O-13), all listed for the architect. S2 waits on H-1, S4 on H-2/H-3, S5 on H-4.
+**Change classification: STRUCTURAL.** The structure was set by the human's rulings (D1–D19), which pre-authorize it. The design-level additions here are `additive` or `clarifying` (TD-O-14 to TD-O-22) or unimplementable-as-worded interims (TD-O-12, TD-O-13), all listed for the architect. **Human rulings H-1..H-4, H-7:** no human ruling is outstanding. S2 waits on the S1 trip-test record (H-7); S4 and S5 wait only on their predecessor slices and the S5 human steps.
