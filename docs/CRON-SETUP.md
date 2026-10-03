@@ -235,16 +235,18 @@ No GitHub issue is ever filed by this feature.
 `bin/hos-cron` resolves each project's repo paths and config dir from a
 machine-local registry. Create `~/.config/hos/projects.conf`:
 
+Values are read literally (no `$HOME`/`~` expansion); use absolute paths.
+
 ```ini
 # <project>_<key>=<value>   — keys: config_dir, worker_root, overseer_root, target_release, max_seconds
-hos_config_dir=$HOME/Code/<project>/.config/hos
-hos_worker_root=$HOME/Code/<project>/Worker
-hos_overseer_root=$HOME/Code/<project>/Overseer
+hos_config_dir=/path/to/<project>/.config/hos
+hos_worker_root=/path/to/<project>/Worker
+hos_overseer_root=/path/to/<project>/Overseer
 hos_target_release=v0.4.2
 
-cps_config_dir=$HOME/Code/<other-project>/.config/hos
-cps_worker_root=$HOME/Code/<other-project>/Worker
-cps_overseer_root=$HOME/Code/<other-project>/Overseer
+cps_config_dir=/path/to/<other-project>/.config/hos
+cps_worker_root=/path/to/<other-project>/Worker
+cps_overseer_root=/path/to/<other-project>/Overseer
 cps_target_release=v1.0.0
 ```
 
