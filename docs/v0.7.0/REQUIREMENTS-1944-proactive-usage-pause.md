@@ -30,8 +30,8 @@ SUPERSEDED). Global, stateless pause separate from `hos-suspend` (D7b, resolves 
 `pause_condition` gauge (D8). Grafana file provisioning and monitrix sync (D9). Consumers ship
 fail-closed (D10). FR-11 narrowing confirmed (D12, closes C-6). `--output-format json`, read
 cost/token gauges, AC-25 rewritten, second fixture (D13). ESC-T1 accepted risk (D14). Grafana
-alerting with an email + SMS contact point, shipped as a worked example, not a consumer requirement
-(D17, D17b). Capped history log, export/backfill, and `last-raw`, recorded as a **clarification** of
+alerting with a two-channel contact point (channels as amended by Amendment 6), shipped as a worked
+example, not a consumer requirement (D17, D17b). Capped history log, export/backfill, and `last-raw`, recorded as a **clarification** of
 "no ever-growing logs" (D18). No hardcoded thresholds (D19). New FR-51–FR-67 and AC-31–AC-52. §0,
 §3, §5–§8 and the Human Review section are updated to match.
 **Amendment 4 (2026-10-03, pm-agent):** Applies ADR-1944 Amendment 4 A4-9, the requirements side of
@@ -53,7 +53,17 @@ command in a remote `timeout`. A timed-out read aborts the poll and is retried b
 with no retry within a poll (FR-3, FR-7, FR-30, FR-48, AC-7; Q9 resolved). D5c logs the abort so
 that alerting can trigger (FR-33, FR-34, FR-62, AC-7, AC-47). §6, §7, §8 and the Human Review
 section are updated to match.
-**Date:** 2026-10-02 (Amendments 2, 3, 4 and 5: 2026-10-03)
+**Amendment 6 (2026-10-03, pm-agent):** Applies ADR-1944 Amendment 6 A6-10, the requirements side
+of human ruling D17c (cited as "human ruling, interactive session 2026-10-03, D17c": *"we will use
+Pushover for the real time notification alerts"*). The human confirmed in the same session that
+**Pushover replaces the never-deployed second channel** and that **email via the Cloudflare Worker
+stays**. Every alert still reaches two independent channels (D17). FR-61 and FR-63 name Pushover +
+email. New FR-69 records Pushover priorities as named values (**pending H-9**). D-5 is resolved,
+D-6 gains the Pushover credentials, and AC-42, AC-43, AC-44 and AC-47 now require Pushover and email.
+FR-61's move from one contact point to two (`hos` urgent, `hos-normal` normal) is **pending human
+confirmation H-8**, with a stated one-contact-point fallback. §5, §7, §8 (S-28–S-31) and the Human
+Review section are updated to match.
+**Date:** 2026-10-02 (Amendments 2, 3, 4, 5 and 6: 2026-10-03)
 **Author:** pm-agent
 **Source issues:** #1944 (open, `priority:critical`, v0.6.1. Its body is authoritative, and its
 2026-10-02 "Design decisions ruled today" section governs wherever it conflicts with older material,
@@ -147,7 +157,7 @@ pattern is not reused. The 20-issue dedup bug in it (including the collapsed `_a
 `hos-cron:2054`) is filed separately as #1946.
 
 **VF-9 (Amendment 3, host facts relayed with the 2026-10-03 rulings; not re-verified here):**
-(a) Alerting is **not** set up on monitrix today: no Alertmanager and no sms-pager is running. So
+(a) Alerting is **not** set up on monitrix today: no Alertmanager and no paging relay is running. So
 fail-open is not safe on this host yet (FR-67), and the delivery ACs (AC-43, AC-44) need new setup.
 (b) Prometheus retention on monitrix is verified at 90d / 12 GiB. (c) The HOS repo is public, and
 monitrix needs no deploy key (D9). (d) A leftover crontab entry runs
@@ -570,14 +580,28 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   stale" alert fires on them.
 - **FR-60: Grafana alerting (D17).** Alerting uses **Grafana alerting**, not Alertmanager.
   `prometheus.yml`'s existing `alertmanager` stanza is left alone.
-- **FR-61: Contact point (D17).** Every HOS alert goes to **one** contact point with **both** an
-  email and an SMS integration. **Email:** a Grafana webhook to a Cloudflare Worker that sends the
-  email, authenticated by a shared secret in an `Authorization` header. The secret lives **only** in
-  Grafana's env file on monitrix and in the Worker's secrets. The Worker code lives **outside** HOS.
-  **SMS:** a webhook to a relay that forwards to an SMS provider (e.g. the never-deployed
-  condoparkshare `monitoring/sms-pager/sms_relay.py`, Grafana webhook → Twilio). No provider has been
-  chosen, so the SMS integration is a **placeholder**. The repo carries **placeholders only**, never
-  real endpoints or secrets.
+- **FR-61: Contact points (D17, D17c) [A6: D17c; H-8 PENDING].** Every HOS alert goes to a
+  contact point with **both** a Pushover integration and an email integration.
+  **Pending H-8:** there is one urgent contact point (`hos`) and one normal-priority contact point
+  (`hos-normal`), each with both integrations. Pushover priority is set per contact point, never
+  per channel. **Fallback if H-8 is rejected:** **one** contact point (`hos`) with both
+  integrations, and every alert is sent at the urgent priority (FR-69).
+  **Email:** a Grafana webhook to a Cloudflare Worker that sends the email, authenticated by a
+  shared secret in an `Authorization` header. The secret lives **only** in Grafana's env file on
+  monitrix and in the Worker's secrets. The Worker code lives **outside** HOS.
+  **Pushover:** Grafana's native Pushover integration, with no relay. The Pushover application token
+  and user key live **only** in Grafana's env file on monitrix (D17c). The repo refers to them only
+  by variable name (`HOS_ALERT_PUSHOVER_APP_TOKEN` holds the application token and
+  `HOS_ALERT_PUSHOVER_USER_KEY` holds the user key; names per ADR-1944 A6-2). The repo carries
+  **variable references and placeholders only**, never real endpoints or secrets.
+  *Was:* see §8 S-28 and S-30 (human ruling, interactive session 2026-10-03, D17c).
+- **FR-69 (new, A6: D17c; values PENDING H-9): Pushover priorities.** Pushover priorities are named
+  values in the contact-point file: urgent class high (1), normal class normal (0), resolved
+  notifications quiet (−1), no emergency by default. Emergency (2), if chosen, carries retry and
+  expire named values. The values are the architect's recommendation and are **pending human
+  confirmation H-9** (alternative: emergency (2) for the whole urgent class, with retry and expire
+  named values). They stay tunable by an ordinary PR either way. If H-8 is rejected, there is no
+  normal class, and every alert uses the urgent value.
 - **FR-62: Required alerts (D17).** At minimum: pause condition (`hos_claude_usage_pause_condition`
   = 1); reading failed; reading stale / poller dead; metrics absent; `settings_valid` = 0; non-zero
   read cost or tokens; `history_write_ok` = 0; dashboard sync stale; **[A4: H-2/H-3]** read cost or
@@ -585,9 +609,9 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   usage read timed out (count threshold tunable: first abort or N consecutive failures).
 - **FR-63: Worked example, not a requirement (D17b).** HOS ships this setup as a documented
   **worked example / "recommended setup"** in `contrib/monitoring/` plus a doc: faberix poller →
-  `node_exporter` → monitrix Prometheus → Grafana alerting → Cloudflare Worker email + SMS relay.
+  `node_exporter` → monitrix Prometheus → Grafana alerting → Pushover + Cloudflare Worker email.
   Each adopting project sets up its own alerting. **HOS guarantees only the poller, the gate, and
-  the metrics contract.**
+  the metrics contract.** **[A6: D17c]** *Was:* see §8 S-28.
 - **FR-64: No hardcoded thresholds (D19).** Every threshold is either a setting
   (`usage-pause.conf`) or a named value at the top of a rules file. The poller exports the thresholds
   it actually uses as `hos_claude_usage_threshold_percent{limit=...}`. Dashboard threshold lines and
@@ -621,10 +645,13 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   Needed for FR-41. The sandbox could not observe it (verification gap a).
 - **D-4 (new, D13):** The **full, unfiltered** JSON envelope, captured by the first real poller
   `--check` (FR-48). Until then, parsing uses only fields already seen (FR-2).
-- **D-5 (new, D17):** An SMS provider choice. Until one exists, the SMS integration is a
-  placeholder, and AC-43's SMS half is deferred.
-- **D-6 (new, D17):** The Cloudflare email Worker endpoint and its shared secret, held outside the
-  repo (FR-61). Needed for AC-43 and AC-44. Per VF-9(a), alerting is not set up on monitrix today.
+- **D-5 (new, D17): RESOLVED by D17c** (human ruling, interactive session 2026-10-03, D17c). The
+  second real-time channel is Pushover. No other provider is needed, and no part of AC-43 or AC-44
+  is deferred. *Was:* see §8 S-29.
+- **D-6 (new, D17) [A6: D17c]:** The Cloudflare email Worker endpoint and its shared secret, held
+  outside the repo (FR-61), plus the Pushover application token and user key, held only in
+  Grafana's env file on monitrix. Needed for AC-43 and AC-44. Per VF-9(a), alerting is not set up
+  on monitrix today.
 
 ---
 
@@ -775,15 +802,17 @@ envelopes whose `result` holds the captured text.
   `hos_claude_usage_read_tokens`. It does not fire when both are 0.
 - **AC-42 (D9, sync-stale alert):** The sync job exports a last-good-pull timestamp and the deployed
   commit. With the timestamp older than the rule's named staleness value, the "dashboard sync stale"
-  alert fires.
-- **AC-43 (D17, test alert delivery):** A test alert sent through the HOS contact point is
-  **received by email**. This is a recorded real run. Once an SMS provider exists (D-5), it is also
-  received by SMS. Until then, the SMS integration is present as a placeholder.
-- **AC-44 (D17, definition of done):** **#1944 is not done until a real pause alert has been
-  delivered.** That means a recorded end-to-end run in which `hos_claude_usage_pause_condition` = 1
-  produces an alert received by email through the contact point. **[A4: H-4]** (procedure: lower
-  one threshold below current live usage, observe the pause and the email, record, restore; all
-  autonomous work pauses for about 10–15 minutes and running cycles finish first)
+  alert fires **and arrives on Pushover and by email** **[A6: D17c]**.
+- **AC-43 (D17, test alert delivery) [A6: D17c; H-8, H-9 PENDING]:** A test alert sent through
+  each HOS contact point is **received on Pushover and by email**, with the Pushover priority
+  matching the contact point's class. This is a recorded real run. *Was:* see §8 S-28, S-29.
+- **AC-44 (D17, definition of done) [A6: D17c]:** **#1944 is not done until a real pause alert has
+  been delivered.** That means a recorded end-to-end run in which
+  `hos_claude_usage_pause_condition` = 1 produces an alert received **on Pushover and by email**
+  through the contact point. Email alone does not satisfy this criterion. **[A4: H-4]** (procedure:
+  lower one threshold below current live usage, observe the pause, the Pushover notification and
+  the email, record, restore; all autonomous work pauses for about 10–15 minutes and running cycles
+  finish first)
 - **AC-45 (D19, no hardcoded thresholds):** A static check finds no literal threshold in the
   dashboard JSON or the alert rules, outside named values at the top of a rules file. Changing a
   threshold in `usage-pause.conf` changes the matching `hos_claude_usage_threshold_percent` series,
@@ -794,10 +823,14 @@ envelopes whose `result` holds the captured text.
   naming the project and cycle_id; the release notes contain 'fail_mode=open without a running
   poller means no quota protection' **[A4: H-1]**. The release notes and the upgrade checklist contain the
   poller setup step. No setting exists that turns the gate off by default for consumers.
-- **AC-47 (D17, required alerts and placeholders) [A4: H-2]:** Every alert in FR-62 exists in
-  `contrib/monitoring/`, is enabled, and routes to the single contact point, which has both an email
-  and an SMS integration. A test in the PR-required suite (`scripts/framework/run_tests_inner_loop.sh`)
-  asserts each required alert by stable rule UID, and asserts both integrations. A static check finds no real endpoint URL or secret in the repo, only placeholders.
+- **AC-47 (D17, required alerts and placeholders) [A4: H-2] [A6: D17c; H-8 PENDING]:** Every alert
+  in FR-62 exists in `contrib/monitoring/`, is enabled, and routes to its HOS contact point (FR-61),
+  each of which has both a Pushover and an email integration (one contact point if H-8 is
+  rejected). A test in the PR-required suite (`scripts/framework/run_tests_inner_loop.sh`) asserts
+  each required alert by stable rule UID, and asserts both integrations, each required alert's
+  receiver, and the Pushover priority floors (urgent ≥ 1, normal = 0). The static check also finds
+  no integration of any other type, including no remnant of the removed channel (§8 S-28). A static
+  check finds no real endpoint URL or secret in the repo, only placeholders.
   `hos_install.sh` does not install `contrib/monitoring/`. **[A5: D5c]** The required-alert set
   includes the read-timeout alert.
 - **AC-48 (D5, forced-command line is final only after a real read):** After the FR-3 entry is
@@ -856,7 +889,8 @@ envelopes whose `result` holds the captured text.
   #1450-pattern dedup bug is #1946's scope.
 - *Amendment 3:* Reading, writing, or clearing `hos-suspend` markers (D7b).
 - *Amendment 3:* Alertmanager, or any change to `prometheus.yml`'s `alertmanager` stanza (D17).
-- *Amendment 3:* The Cloudflare email Worker's code, and choosing an SMS provider (D17).
+- *Amendment 3:* The Cloudflare email Worker's code (D17). *Amendment 6:* an SMS channel (removed
+  by D17c).
 - *Amendment 3:* Requiring consumers to adopt the worked-example alerting stack (D17b), or shipping
   `contrib/monitoring/` via `hos_install.sh` (D9).
 - *Amendment 3:* A consumer-default-off switch for the gate (D10).
@@ -1022,6 +1056,16 @@ From #1944 (carried over unchanged unless marked):
 | D-3 | #1944 10-02 "Dashboarding" + Q4 |
 | D-4 | human ruling, interactive session 2026-10-03, D13 |
 | D-5, D-6 | human ruling, interactive session 2026-10-03, D17 |
+| FR-61 (A6 change) | **human ruling, interactive session 2026-10-03, D17c** (Pushover + email; Pushover credentials only in Grafana's env file on monitrix); D17 (two independent channels); two contact points **pending H-8** (one-contact-point fallback); ADR-1944 A6-1, A6-2, A6-3, A6-10 item 1 |
+| FR-63 (A6 change) | **human ruling, interactive session 2026-10-03, D17c**; D17b; ADR-1944 A6-7, A6-10 item 2 |
+| FR-69 | **human ruling, interactive session 2026-10-03, D17c**; values **pending H-9**; ADR-1944 A6-4, A6-10 item 3 |
+| D-5 (A6: RESOLVED) | **human ruling, interactive session 2026-10-03, D17c**; ADR-1944 A6-1, A6-10 item 5 |
+| D-6 (A6 change) | **human ruling, interactive session 2026-10-03, D17c**; ADR-1944 A6-2, A6-10 item 6 |
+| AC-42 (A6 change) | **human ruling, interactive session 2026-10-03, D17c**; ADR-1944 A6-6, A6-10 item 7 |
+| AC-43 (A6 rewrite) | **human ruling, interactive session 2026-10-03, D17c**; priority per class pending H-8/H-9; ADR-1944 A6-6, A6-10 item 8 |
+| AC-44 (A6 change) | **human ruling, interactive session 2026-10-03, D17c**; H-4 procedure text updated; ADR-1944 A6-6, A6-10 item 9 |
+| AC-47 (A6 change) | **human ruling, interactive session 2026-10-03, D17c**; contact-point count **pending H-8**; ADR-1944 A6-5, A6-10 item 10 |
+| §5 non-goal (A6 change) | **human ruling, interactive session 2026-10-03, D17c**; ADR-1944 A6-10 item 11 |
 
 ---
 
@@ -1145,6 +1189,32 @@ From #1944 (carried over unchanged unless marked):
   FR-62, AC-7, AC-47. The `timeout_side` field and the alert's default count (first abort) are
   architect decisions within D5c (ADR-1944 A5-6, A5-7).
 
+**Amendment 6 supersessions (human ruling, interactive session 2026-10-03, D17c, unless noted):**
+
+- **S-28 (D17c), the second channel:** D17's "email and SMS" contact point, where SMS was a
+  **placeholder** webhook to a relay forwarding to an unchosen SMS provider (the never-deployed
+  condoparkshare `monitoring/sms-pager/sms_relay.py`, Grafana webhook → Twilio), → **Pushover**
+  through Grafana's native integration, with no relay. Email via the Cloudflare Worker **stays**
+  (confirmed by the human in the same session). SMS is removed entirely, not kept as a placeholder.
+  Superseded text: FR-61 ("both an email and an SMS integration" and its SMS sentence group);
+  FR-63 ("Cloudflare Worker email + SMS relay"); AC-43 ("Once an SMS provider exists (D-5), it is
+  also received by SMS. Until then, the SMS integration is present as a placeholder."); AC-47
+  ("which has both an email and an SMS integration"); the §5 non-goal "choosing an SMS provider
+  (D17)" → "an SMS channel (removed by D17c)"; the Amendment 3 changelog's "email + SMS contact
+  point"; and VF-9(a)'s "no sms-pager is running" → "no paging relay is running" (same host fact,
+  reworded). ADR-1944 A6-1, A6-10 items 1, 2, 8, 10, 11, 12.
+- **S-29 (D17c), D-5 RESOLVED:** D-5 "an SMS provider choice … AC-43's SMS half is deferred" →
+  resolved; Pushover is the second channel, and no part of AC-43 or AC-44 is deferred. AC-44's
+  "received by email" → "received on Pushover and by email"; email alone no longer satisfies it.
+  ADR-1944 A6-1, A6-6, A6-10 items 5, 9.
+- **S-30 (architect decision A6-3), PENDING H-8:** FR-61's "**one** contact point" → one urgent
+  (`hos`) and one normal-priority (`hos-normal`) contact point, each with both integrations, because
+  a Pushover integration carries one fixed priority. This departs from FR-61's ruled wording, so it
+  is **not** in force until the human confirms H-8. Fallback if rejected: one contact point, every
+  alert at urgent priority. FR-61, AC-43, AC-47.
+- **S-31 (architect recommendation A6-4), NEW, PENDING H-9:** Pushover priorities as named values
+  (urgent 1, normal 0, resolved −1, no emergency by default). FR-69, AC-43, AC-47.
+
 ---
 
 ## Escalation flag (CORE self-flag)
@@ -1178,6 +1248,16 @@ in Amendment 5 goes beyond ADR-1944 A5-8 or the cited rulings. RISK: HIGH (uncha
 real tunnel exposure; D5b's failure mode, a missing `timeout`, is fail-closed). CONFIDENCE: 90% on
 the transcription of A5-8.
 
+Amendment 6 classification: the channel change (Pushover replaces the second channel; email
+stays) is **structural** and **human-ruled** (human ruling, interactive session 2026-10-03, D17c);
+the ruling is the sign-off. FR-61's move to two contact points (S-30) is **structural** and **not
+human-ruled yet**: it is written as **pending H-8** with the ruled one-contact-point wording as the
+fallback, and is not applied as a requirement until the human confirms. FR-69's priority values
+(S-31) are **new behavior** and are written as **pending H-9**. Nothing in Amendment 6 goes beyond
+ADR-1944 A6-10 or the cited ruling. RISK: MEDIUM for this amendment (overall HIGH unchanged; the
+second channel goes from a non-functional placeholder to a live one). CONFIDENCE: 90% on the
+transcription of A6-10.
+
 ## Human Review Required
 
 Earlier items now ruled and removed: C-1; [DERIVED] FR-22, FR-25, FR-30 (D3, D7b, D4); AS-1/2/3
@@ -1193,6 +1273,20 @@ Earlier items now ruled and removed: C-1; [DERIVED] FR-22, FR-25, FR-30 (D3, D7b
 - **H-4: RESOLVED (confirmed).** AC-44 procedure (S-21).
 - **H-7: RESOLVED (new ruling, applied).** S1 trip test gates S2 (AC-53, S-22).
 - Not requirements rulings (tracked in ADR-1944 A4-8): H-5 (informational) and H-6 (human actions).
+  *Amendment 6:* H-6 gains the Pushover setup actions (account, app, application token, the two
+  monitrix env vars set before the first reload-service start, egress to api.pushover.net:443;
+  ADR-1944 A6-9).
+
+**Added in Amendment 6 (open; ADR-1944 A6-9):**
+- **H-8 (product boundary: one vs two contact points). PENDING.** FR-61 as ruled says "one contact
+  point". ADR-1944 A6-3 needs two (`hos` urgent, `hos-normal` normal) so that warnings arrive at
+  normal Pushover priority. **Recommendation:** two contact points, each with Pushover and email.
+  **Alternative / fallback:** keep one contact point and send everything at urgent priority.
+  Affects FR-61, AC-43, AC-47 (S-30). Needed before the S4 PR is reviewed.
+- **H-9 (user-visible: Pushover priority values). PENDING.** **Recommendation:** urgent class 1,
+  normal class 0, resolved −1, no emergency. **Alternative:** emergency (2) for the whole urgent
+  class, retry 300 s, expire 3600 s. Values remain tunable by PR. Affects FR-69, AC-43 (S-31).
+  Needed before S5's AC-43 run.
 
 Still open:
 1. **[DERIVED] FR-24** (the pause must not stop the poll): confirm. It is satisfied structurally by
