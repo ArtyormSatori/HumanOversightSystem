@@ -1,0 +1,1 @@
+{"agent":"overseer","decision":"PROPOSE_ONLY","event":"pr-review","head_sha":"8eae0dfdfc5f0e414b7b1770a912048fcc4d480d","pr":1948,"protected_surface":false,"summary":"Docs-only TD-1643 Amendment E; composite LOW floored HIGH by diff_size; matrix PROPOSE_ONLY (DEP #152-followup); needs-ai withheld (#1557)","tier":"HIGH","verdict_review_id":5398191978}
