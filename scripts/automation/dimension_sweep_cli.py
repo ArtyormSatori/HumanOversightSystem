@@ -36,8 +36,8 @@ bootstrap/invoke_agent.sh, the agent file and the posture all execute from the
 checked-out head, with the operator's credentials. (2) On Ctrl-C or a runner
 timeout the runner kills the wrapper's process group, but the primitive's own
 `claude` child runs in its own session and may survive. After an interrupted run,
-check `pgrep -f "claude --agent"` and stop any leftover. This is a known W1 gap,
-tracked separately.
+check `pgrep -af -- "--output-format json --agent code-reviewer"` and stop any
+leftover. This is a known W1 gap, tracked separately.
 
 Pilot with 3 launched runs first and stop if `report` shows
 terminal_reason_missing_count > 0, two of three runs without
