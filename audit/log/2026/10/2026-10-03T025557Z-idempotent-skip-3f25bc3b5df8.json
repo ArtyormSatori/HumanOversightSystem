@@ -1,0 +1,1 @@
+{"actor":"hos-overseer-hos[bot]","event":"idempotent-skip","head_sha":"80e4de9c9cfcdd94a3c351dbaf34a2ab7a799173","pr":1949,"reason":"#1215: verdict already posted on this head at 02:48:31Z (after ScottThurlow APPROVED 02:47:36Z); no commits, comments, reviews or label changes since; needs-human in place"}
