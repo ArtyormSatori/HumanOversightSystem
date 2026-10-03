@@ -289,3 +289,83 @@ Slices 1–7 are independently valuable and unblocked. If ESC-1/ESC-2 stall inde
 **Two items for the orchestrating session, not decisions:** file the specialist-subagent audit issue (AD-16), and annotate #1357 with the AD-4 step-4c amendment (§3, closing note).
 
 **Not escalated, because already ruled:** the layered-CLI granularity question (**Q1** — ruled on #1542, 2026-09-10, and bound by ADR-1357), and the decision-record precondition (**Q6** — superseded by ADR-1357 AD-5, which prohibits the mechanism the question proposed).
+
+---
+
+## Amendment 2 — 2026-10-03 (architect, from the slice-1 technical-design review)
+
+**Source:** architect review of `docs/v0.7.0/TECHNICAL-DESIGN-1542-S1-detector-baseline.md`, iteration 1
+(rulings TD-O1…TD-O7 and RC-1, recorded in full at the end of that document). Verified against HEAD
+`1307f25f0`. Append-only: no decision above is rewritten; each item below states which decision it
+refines. ESC-1, ESC-2 and ESC-3 remain human-held and are not touched.
+
+**AM2-1 — AD-11, call-a-function rule: fires whether or not an invocable surface exists (TD-O1).**
+The clause "for any module … that has no invocable surface" is struck. The rule fires on any
+behaviour-driving reference to a repo Python function (`module.py:function`, `function(...)` for a
+repo-defined name, `python3 -c`, repo `import` snippets, `python` fences). Where a surface exists, the
+document names the surface, not the function. A function name in an agent document is the AV-5 hazard
+whether or not a CLI exists, and deciding "has a surface" would need a function→surface registry that
+would itself drift. **Corollary:** for the call-a-function rule family, a baseline entry may be
+`accepted` only as a *prohibition example*; a "descriptive reference" to a function is debt.
+
+**AM2-2 — AD-11, meaning of "no entry may be added after the detector lands".** A baseline entry is an
+*addition* in AD-11's sense if its construct text did **not** exist in the base commit's scanned
+documents. Entries that surface *pre-existing* text (a new rule, a newly scanned document, a fingerprint
+version change, or growth of the repo-function index) are admissible, and only those. A brand-new
+document added to the scanned set must therefore be clean. The mechanism is the TD's closure check as
+amended by RC-1; there is still no flag, env var, label or file that admits anything.
+
+**AM2-3 — AD-12, the allowlist clause for slices 2–8 (TD-O4).** The per-role policy templates are slice
+9's artifact and are gated on ESC-2. For slices 2–8, AD-12's "allowlist entry" clause is **discharged
+by slice 9**: the slice-9 PR authors entries for every surface named at that time and activates coverage
+leg 2 in the same PR, so any omission is a red required check at that moment. Wrapper, prose and test
+still land together in every slice 2–8 PR. Nothing is deferred silently: until activation, every
+coverage run states in `not_verified` that the allowlist legs are not being checked (AD-13).
+
+**AM2-4 — §4, new slice "1b — FR-7 residual prose sweep" (TD-O3, TD-O7).** Inserted after slice 1,
+unblocked, no new code. Owns every baseline entry that is fixable by prose alone with an *existing*
+surface: the `source <(bootstrap/get_app_token.sh …)` instructions (delete — `hos-cron` mints
+pre-session and every wrapper mints internally); the overseer-cron release-request listing
+(`query_issues.sh --list --label release-request` already covers it); descriptive call-a-function
+references (AM2-1); and the G13 deletion below. Items needing a *new* surface stay with their owning
+slice (e.g. `git remote get-url origin` → slice 2's `--repo` defaulting). Slice 1b lands after slice 1's
+detector so its debt reduction is measured, and it is a protected-surface (`.claude/agents/**`) PR,
+human-gated.
+
+**AM2-5 — AD-7 row 4.11 (G13) and §4 slice 7: G13 becomes a deletion (TD-O7).** #1615 (`492826cf`,
+2026-09-14) retired the SPEC-328 out-of-scope-commit register check; no producer of an
+`Out_of_scope_commits:` bounce remains (`overseer.md:275` records the retirement). `worker.md`'s
+"Out-of-scope commit bounce response (SPEC-328)" section is therefore instructions for an event that can
+no longer occur, and the AD-6 principle applies: a control the system does not run must not be written
+as an instruction. G13 is **not built**; the section is deleted in slice 1b together with the stale
+out-of-scope references in `overseer.md` (`:436`, `:572`, the `:635` worked example). Slice 7 is G12
+only. **Binding on #1626** (which owns the re-homed guarantee): any remediation path it introduces for
+the worker must be an invocable surface under AD-1, and lands under AD-11/AD-12 natively — it may not
+revive Option A as prose.
+
+**AM2-6 — AD-10 / ADR-1357 AD-13 test 7: one check, owned here (TD-O5).** Slice 1's coverage check *is*
+test 7. #1357's slice 6 consumes it (leg 1 for "named wrapper exists"; the call-a-function rules on
+`overseer.md` for "no `call <function>(...)` for `merge_authority.py`") and does not build a second
+document↔tooling check. The orchestrating session annotates #1357.
+
+**AM2-7 — AD-14: not mechanized in slice 1; two ship-set defects recorded (TD-O6, RC-4).** (i)
+`framework_consumer_files.txt` is not the single ship-set authority (`hos_install.sh` copies five
+`bootstrap/` files directly); a mechanical AD-14 leg needs one authority first — separate issue. (ii)
+**New finding:** `scripts/framework/setup_branch_protection.sh` ships to consumers
+(`framework_consumer_files.txt:64`) but its required-context list already names seven contexts whose
+producing workflows are not shipped (`tests`, `oversight-gate-*`, `oversight-validator-*`) — the exact
+"required check that never reports, permanently blocking every PR" failure that file's own comment
+(`:42-45`) warns against. That pre-existing defect is not #1542's to fix, but **#1542 may not enlarge it**:
+the HOS-repo-only `sandbox-detector` / `sandbox-coverage` contexts must not be added to the
+consumer-shipped unconditional list (RC-4 binds the mechanism).
+
+**Startup-gap and affected sign-offs.** *Should these have been settled in the initial review?*
+AM2-1/AM2-2 — partly: AD-11's surface-existence wording was underspecified and AV-5 already contained
+the argument for the stricter form. AM2-5 — no: #1615 landed two days after this ADR. AM2-3 — yes: the
+AD-12 vs slice-9 sequencing tension was internal to this ADR and should have been caught; recorded
+here as a `startup-artifact-gap`-class item for the orchestrating session to annotate on #1542. AM2-7(ii)
+— a pre-existing defect outside this ADR's scope, found by this review. **Affected sign-offs: none.**
+No slice of #1542 has been built (`query_prs.sh`, `commit_work.sh`, `assert_identity.sh` absent on
+HEAD); G13 was never built; ADR-1357 slice 6 has not built test 7. Prior sign-offs on #1580, #1615,
+#1657 and #1540 S2 stand — the detector baselines their sites as owned debt rather than invalidating
+them.
