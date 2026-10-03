@@ -543,3 +543,47 @@ Nothing for #1944 has been designed or built before this ADR, so **no prior sign
 **CONFIDENCE: HIGH** on §0 (re-derived from the tree), AD-1 to AD-9, and AD-12. **MEDIUM-HIGH** on AD-10, which depends on the symlink precondition (fallback defined), and on AD-11's alert routing (receivers unknown).
 **BLAST RADIUS:** `bin/hos-cron` cycle start (both roles, every project, every consumer on upgrade); new `bin/hos-usage-poll` + `bin/lib/usage_pause.py`; user crontab; `~/.ssh/authorized_keys`; `~/.hos/usage-pause/`; `~/.config/hos/usage-pause.conf`; `/var/lib/hos-usage` + one symlink in node_exporter's textfile directory; monitrix Prometheus rules and Grafana provisioning.
 **Change classification: STRUCTURAL.** A new gate on every autonomous cycle, a new credential-bearing host path, and new host-infra artifacts. ESC-1 must clear the product-boundary checkpoint before S2 ships to consumers. S1/S2 on faberix may proceed on `technical-design` completion.
+
+---
+
+## Amendment 1 (2026-10-03, architect, TD review round 1)
+
+These revisions come out of reviewing `TECHNICAL-DESIGN-1944-proactive-usage-pause.md`, DRAFT-1 (§9.1 there). They are appended; the text above is not rewritten. Where they conflict, this amendment governs. Startup-gap check: every item corrects a premise before any code exists, and the only artifact built against the superseded text is the TD, which was updated in the same round. **No sign-off is orphaned.**
+
+- **A1-1 (AD-5, call site).** The sole `/usage` call site is **`bin/lib/usage_pause.py`**, not `bin/hos-usage-poll`.
+  - It holds the remote command as one constant, `REMOTE_CMD_TEMPLATE`, and that constant is also the source of the `--check`/`--print-setup` forced-command text.
+  - The T4.1 exemption is `bin/lib/usage_pause.py`, matched deterministically through its docstring.
+  - T4.1b pins the template line and the sole call site.
+  - AD-5.1's exact remote command is unchanged.
+- **A1-2 (AD-6, time bound; AD-4 enum).** The `<timeout_bin> --kill-after=5 <t>` prefix is replaced by an in-process bound in Python: `Popen(start_new_session=True)`, `wait(read_timeout_seconds)`, then process-group SIGTERM, a 5 s grace, then SIGKILL.
+  - The ssh argv and options are otherwise exactly as AD-6.
+  - `no_timeout_binary` is removed from the failure enum, which now has eight reasons.
+  - Timeout is observed directly, not inferred from exit code 124/137.
+  - **Why:** a bash `_TIMEOUT_BIN` would be a permanent fourth entry in ADR-1643 AD-16.6's T4.2 ledger, which exists for AI-review timeout copies. The Python form is no more complex, removes the macOS coreutils dependency, and cannot mistake a remote exit code for a timeout.
+  - FR-7 still holds: the read is always bounded.
+- **A1-3 (AD-4, success criterion vs FR-11).** AD-4 stands: content decides. A transport failure (ssh exit 255, spawn failure, timeout) is a FAILED read whatever the content. Any other remote exit code is recorded as `remote_exit` and does not by itself fail the read.
+  - This **overrides FR-11's literal "non-zero exit" item**. FR-11's own cited source (the reference parser's content-only condition) and FR-13 both support the override.
+  - **Requirements amendment required:** pm-agent rewords FR-11. The human confirms, because the change narrows a failure list in the less-pausing direction.
+  - pm-agent also rewords AC-25, which cannot be observed on the real success shape (TD §3.13 item 3 is the substitute).
+- **A1-4 (AD-9, bounds).** `staleness_seconds` must be `> poll_interval_seconds + read_timeout_seconds` **and `≤ 7200`**. The upper bound stops a typo from becoming a near-disable, and 7200 keeps the range non-empty at the maximum interval. `claude_bin` must match `^/[A-Za-z0-9._+/-]{1,254}$` with no `/./` or `/../` segment, because it is interpolated into a remote command and an `authorized_keys` line.
+- **A1-5 (AD-10, metrics).** `hos_claude_usage_threshold_percent` is emitted **only when settings are valid**. A new always-present gauge, `hos_claude_usage_settings_valid` (1/0), is added. Under invalid settings, `pause_condition` is 1.
+- **A1-6 (AD-12, S4).** "A `promtool` lint test in CI" becomes: structural YAML/JSON and metric-name tests in CI, plus an `integration`-marked `promtool check rules` test that is skipped when `promtool` is absent. The human's `promtool check` output on monitrix is the recorded evidence. S4 does not touch `.github/workflows/**`.
+- **A1-7 (AF-2, statement correction).** The OS-level half of AF-2 is narrower than stated. `denyWrite` covers only each role's **own** clone's `bin/`, while `allowWrite` covers all three clones, so a sandboxed Overseer or Human session can write `Worker/bin/*`. AF-2's governance half (CODEOWNERS → HUMAN_REQUIRED) and AF-1 (decision *data* outside every `allowWrite`) are unaffected.
+  - This is a **pre-existing gap outside #1944's scope** (TD ESC-T1). #1944 neither widens it nor depends on closing it.
+  - The fix (adding the three clones' `bin/` to `denyWrite`) is protected `contract/**` surface and needs security-reviewer review plus human approval.
+
+**Confirmed without change** (clarifications the TD made under AD-3/AD-4/AD-8, now binding):
+- exact-title dedup and auto-close, not prefix (AD-8);
+- the complete query through `gh api --paginate … --jq` under `_REPO_SLUG`, using raw `gh` rather than the bootstrap wrappers, which do not ship to consumers (AD-8);
+- one `key=value` per `_audit` argv element (AD-8);
+- `lock_stale_reclaimed` as a `diagnostics` key, not a failure reason (AD-4);
+- close-pending retry memory, the corrupt-previous-file close sweep, and the check-error flag (AD-8).
+
+**Human confirmation added to §5:**
+- 12: FR-11 narrowing (A1-3);
+- 13: AC-25 rewording;
+- 14: the A1-7 cross-clone `denyWrite` gap, a finding outside #1944's scope;
+- 15: widening ESC-4 to every single-page dedup site in `bin/hos-cron` (`:954`, `:1430`, `:1682`, `:1760`, `:1801`, `:2063`, `:2167`, `:2191`) and `query_issues.sh --list`;
+- 16: the collapsed `_audit` call at `bin/hos-cron:2054`.
+
+Items 1–11 of §5 are unchanged and unresolved.

@@ -1,6 +1,6 @@
 # TECHNICAL DESIGN — ADR-1944: proactive Claude usage-threshold pause. A loopback poller writes one reading, `hos-cron` gates every cycle on it, and the dashboard path can never touch the decision
 
-**Status:** DRAFT-1. Waiting on `architect` review (iteration 1 of a 5-round cap). This document is the implementation contract for ADR-1944. **S1 (poller) and S2 (`hos-cron` gate) are fully specified and codeable. Nothing in them is TBD.** Where this design adds to an AD or tightens it, the change is listed in §9 as a TD-O question with a binding interim choice, so the coder never waits on the answer. This document contains no application code.
+**Status:** DRAFT-1 + **Architect round 1: APPROVED WITH CHANGES (2026-10-03).** The architect applied its changes directly; each is marked "Architect round 1". The rulings are in §9 and the AD changes are in ADR-1944 Amendment 1. No further design round is needed unless `technical-design` disputes a change. Original status text: Waiting on `architect` review (iteration 1 of a 5-round cap). This document is the implementation contract for ADR-1944. **S1 (poller) and S2 (`hos-cron` gate) are fully specified and codeable. Nothing in them is TBD.** Where this design adds to an AD or tightens it, the change is listed in §9 as a TD-O question with a binding interim choice, so the coder never waits on the answer. This document contains no application code.
 **Date:** 2026-10-02
 **Author:** technical-design
 **Baseline:** local `HEAD` = `03aebf13d` (the three #1944 design commits on top of `9f6a4f05f`). `origin/main` = `ba1e67b97`. `git diff HEAD origin/main` touches only `contract/dimensions/**`, `packs/*/dimensions.yaml`, `tests/automation/test_dimension_registry_data.py` and the two #1944 docs. **Every file this design cites is byte-identical at both commits**, so every line number below holds on `origin/main` (TD-VF-1).
@@ -18,9 +18,9 @@ Requirements Amendment 1 and ADR-1944 bind. In particular: standalone `*/5` poll
 
 ## 0. Verification findings — every ADR premise re-derived
 
-### TD-VF-1 (process) — the checked-out branch is `main`, not the named design branch. The line numbers still hold.
+### TD-VF-1 (process) — the line numbers hold on `origin/main`.
 
-The working tree is on local `main` (`ahead 3, behind 4`). Branch `interactive-1944-proactive-usage-pause-design` exists at `9f6a4f05f` and lacks the three #1944 doc commits. I did not switch branches, as instructed. The 4 commits only on `origin/main` (the #1943 W5b merge) touch no file this design cites, so every anchor below holds on `origin/main`. The orchestrating session must put this TD and the two upstream docs on the right branch before the PR.
+*Architect round 1:* the branch concern is moot. All four #1944 docs are now on `interactive-1944-proactive-usage-pause-design`, and ESC-T3 is closed. The architect re-checked the anchors that its rulings rely on (`:864-870`, `:1839-1841`, `:247`, `:349`, the T4.1/T4.2 ledgers) on that branch, and they match. The 4 commits only on `origin/main` (the #1943 W5b merge) touch no file this design cites, so every anchor below holds on `origin/main`.
 
 ADR anchors re-derived against `bin/hos-cron` (2245 lines):
 
@@ -37,7 +37,7 @@ ADR anchors re-derived against `bin/hos-cron` (2245 lines):
 | Optional model auth probe | `:895-904` | `:894-904` ✓ (the `"$CLAUDE_BIN" --print` call is `:899`) |
 | Halt check | — | `:906-933` |
 | Worktree hygiene invocation | — | `:1258` (after the gate) |
-| `_TIMEOUT_BIN` (private copy) | — | `:1839-1840` |
+| `_TIMEOUT_BIN` (private copy) | — | `:1839-1841` (Architect round 1: re-verified) |
 | Session launch `--print` | `:1849` | `:1849` ✓ |
 | #1446 breaker block (commented out) | `:2090-2155` | `:2090-2155` ✓ |
 | #1446 live auto-close half | `:2181-2202` | `:2181-2202` ✓ |
@@ -59,11 +59,13 @@ ADR anchors re-derived against `bin/hos-cron` (2245 lines):
 
 ### TD-VF-4 (HIGH) — the ADR handled T4.1 but missed T4.2. A bounded SSH read in bash is a fourth private `_TIMEOUT_BIN` copy and fails the existing suite.
 
-`test_agent_invocation_migration.py:135-200` (T4.2) asserts that the set of files in `scripts/`, `bootstrap/`, `bin/` with a code line matching `_TIMEOUT_BIN\s*=` is **exactly** `{validate_agents.sh, validate_scripts.sh, bin/hos-cron}`. AD-6 binds `<timeout_bin> --kill-after=5 …` in `bin/hos-usage-poll`. Naming the variable anything else would pass the test by exploiting a blind spot, the same thing AD-5 forbids for T4.1. **BINDING:** the poller names the variable `_TIMEOUT_BIN`, and S1 adds `"bin/hos-usage-poll"` to `_T4_2_EXPECTED_TIMEOUT_BIN_COPIES` with the comment `# EXEMPT (permanent, ADR-1944 AD-6): bounds the non-agent loopback /usage read, not an AI review.` The test name `…_is_exactly_three` becomes `…_is_exactly_four`. TD-O-1 asks the architect to confirm this over moving the bounded exec into Python.
+`test_agent_invocation_migration.py:135-200` (T4.2) asserts that the set of files in `scripts/`, `bootstrap/`, `bin/` with a code line matching `_TIMEOUT_BIN\s*=` is **exactly** `{validate_agents.sh, validate_scripts.sh, bin/hos-cron}`. AD-6 binds `<timeout_bin> --kill-after=5 …` in `bin/hos-usage-poll`. Naming the variable anything else would pass the test by exploiting a blind spot, the same thing AD-5 forbids for T4.1. ~~**BINDING:** the poller names the variable `_TIMEOUT_BIN`, and S1 adds `"bin/hos-usage-poll"` to `_T4_2_EXPECTED_TIMEOUT_BIN_COPIES` … `…_is_exactly_four`.~~ **Architect round 1 (TD-O-1 OVERRIDDEN):** the bounded SSH read moves into Python (`usage_pause.py read-usage`, §3.1/§3.6 P8). No `_TIMEOUT_BIN` exists anywhere in the poller, and **the T4.2 ledger and test name do not change**. The finding stands: it is the reason for the override.
 
 ### TD-VF-5 (HIGH) — S2 breaks nearly every existing `test_hos_cron.py` test unless the shared fixture writes a fresh reading.
 
 `CronEnv` (`test_hos_cron.py:86-500`) builds a fake HOME with no `~/.ssh/hos_loopback`, no `usage-pause.conf` and no reading file. After S2, every test that drives the launcher past `:868`, which is most of the 4,600-line suite, would pause with `poller_not_installed`. A second problem: the `gh` stub's generic `*"labels=needs-human"*)` case (`:238`) answers `0`, and `jq` cannot iterate that, so a new dedup query would fall into it and read as a failed query. **BINDING** S2 harness changes are in §4.6: a default fresh under-threshold reading written by `CronEnv.run()`, and a dedicated `gh` stub case placed before `:214`.
+
+*Architect round 1, a third problem:* `test_hos_cron.py:1768-1839` copies `bin/hos-cron` and `bin/lib/git-credentials.sh` into a temporary `repo/bin/` and runs that copy. Without `bin/lib/usage_pause.py` next to it, the gate reaches `check_error` and pauses. §4.6 item 4 covers this.
 
 ### TD-VF-6 (MEDIUM) — `_audit` with one space-joined string records **one** field, not several.
 
@@ -108,7 +110,7 @@ Line 8 also contains U+2014 (em dash). The fixture must be byte-exact (§1.9).
 
 ### TD-VF-13 (LOW) — T4.1 will deliberately match the poller.
 
-To keep AD-5.3 deterministic rather than "either way", the poller's `--help` text names the command literally (`claude -p /usage`). T4.1 therefore matches the file, and S1 adds it to `_T4_1_EXPECTED_EXEMPTIONS` (§3.11).
+To keep AD-5.3 deterministic rather than "either way", the poller's `--help` text names the command literally (`claude -p /usage`). T4.1 therefore matches the file, and S1 adds it to `_T4_1_EXPECTED_EXEMPTIONS` (§3.11). *Architect round 1: retargeted.* The literal now lives only in `bin/lib/usage_pause.py`, in the first line of its module docstring, and that file is the one T4.1 exemption. `bin/hos-usage-poll` must not contain `claude -p`.
 
 ### Verification gaps I could not close
 
@@ -130,7 +132,7 @@ To keep AD-5.3 deterministic rather than "either way", the poller's `--help` tex
 | `$STATE/usage-pause/` | poller, `hos-cron` | — | mode 0700, created by whichever runs first |
 | `$STATE/usage-pause/reading.status` | poller only | `hos-cron` gate, `--check`, `write-prom` | §1.3 |
 | `$STATE/usage-pause/reading.status.tmp` | poller | — | transient, fixed name |
-| `$STATE/usage-pause/<role>-<project>.status` | `hos-cron` gate (`check` / `record`) only | gate | §1.4; `<project>` sanitized `tr -c 'A-Za-z0-9._-' '-'` exactly as `hos-cron:349` |
+| `$STATE/usage-pause/<role>-<project>.status` | `hos-cron` gate (`check` / `record`) only | gate | §1.4; `<project>` sanitized `tr -c 'A-Za-z0-9._-' '-'` exactly as `hos-cron:349`. *Architect round 1:* `tr` works **per byte**, so Python must sanitize the UTF-8 **bytes** (each byte outside the set becomes one `-`), not the `str`. Otherwise a non-ASCII project name gives bash and Python different file names, and the check-error flag is never found. Test: `test_project_sanitize_matches_tr_bytewise`. |
 | `$STATE/usage-pause/<role>-<project>.status.tmp` | gate | — | transient |
 | `$STATE/usage-pause/check-error-<role>-<project>.flag` | `hos-cron` bash (on `check_error`) | `check` | empty file, §4.3 G2 |
 | `$STATE/usage-pause/issue-body-<role>-<project>.md` | `issue-body` / bash | `gh` | overwritten per use |
@@ -148,7 +150,9 @@ To keep AD-5.3 deterministic rather than "either way", the poller's `--help` tex
 ### 1.2 Enums and reason tokens
 
 **Read-failure reasons (AD-4, closed, stable).** These are values of `reason=` in the reading file and of the `reason` label on `hos_claude_usage_read_failure`:
-`ssh_failed`, `timeout`, `empty_session`, `missing_session`, `missing_weekly`, `unparseable`, `claude_not_executable`, `no_timeout_binary`, `crashed`.
+`ssh_failed`, `timeout`, `empty_session`, `missing_session`, `missing_weekly`, `unparseable`, `claude_not_executable`, `crashed`.
+
+*Architect round 1:* the list has **eight** reasons. `no_timeout_binary` is removed: the read is bounded in Python (TD-O-1), so that failure cannot occur. A reason that can never be emitted is dead enum surface.
 
 `lock_stale_reclaimed` is **not** a failure reason. AD-4 lists it as "diagnostic only; the read still runs", so it is recorded in a separate key, `diagnostics=lock_stale_reclaimed`, and can appear on a success record (TD-O-11, clarifying).
 
@@ -300,7 +304,7 @@ Bodies are rendered by `usage_pause.py issue-body` (§4.2), except the `check_er
 | `weekly_threshold` | 90 | 1–100 |
 | `fail_mode` | `closed` | exactly `closed` \| `open` |
 | `poll_interval_seconds` | 300 | multiple of 60, 60–3600 |
-| `staleness_seconds` | 900 | `> poll_interval_seconds + read_timeout_seconds` **and ≤ 3600** (upper bound is TD-O-5) |
+| `staleness_seconds` | 900 | `> poll_interval_seconds + read_timeout_seconds` **and ≤ 7200** (*Architect round 1, TD-O-5:* the draft's `≤ 3600` left no valid value when `poll_interval_seconds=3600`. With 7200 the range is never empty, because interval + timeout ≤ 3600 + 3570 = 7170.) |
 | `read_timeout_seconds` | 60 | 5 to `poll_interval_seconds − 30` |
 | `failopen_issue_after` | 3 | 1–100 |
 | `claude_bin` | unset → resolved | `^/[A-Za-z0-9._+/-]{1,254}$`, no `/../` or `/./` segment, does not end in `/` (charset is TD-O-5: the value is interpolated into a remote command and an `authorized_keys` line) |
@@ -357,7 +361,7 @@ Usage:                 0 input, 0 output, 0 cache read, 0 cache write
 | C | `bin/hos-cron` | changed | §4 gate block + two title constants + one header paragraph | S2 | yes |
 | D | `scripts/framework/framework_consumer_files.txt` | changed | add `bin/hos-usage-poll`, `bin/lib/usage_pause.py` under the existing `bin/` heading | S1 | yes |
 | E | `bootstrap/hos_install.sh` | changed | post-install summary prints one §2a pointer line inside the existing cron-suggestion block (`:2515-2533`); provisions nothing (FR-47) | S1 | yes |
-| F | `tests/framework/test_agent_invocation_migration.py` | changed | T4.1 exemption + T4.1b + T4.2 ledger | S1 | no |
+| F | `tests/framework/test_agent_invocation_migration.py` | changed | T4.1 exemption (`bin/lib/usage_pause.py`) + T4.1b. *Architect round 1:* the T4.2 ledger is **unchanged** (TD-O-1). | S1 | no |
 | G | `tests/automation/fixtures/usage/` | new | fixtures + `README.md` provenance | S1 (S3 adds golden `.prom`) | no |
 | H | `tests/automation/test_usage_pause_{parse,settings,status,decision}.py` | new | units | S1 | no |
 | I | `tests/automation/test_hos_usage_poll.py` | new | poller integration (stub ssh/claude/crontab) | S1, S3 | no |
@@ -385,7 +389,24 @@ These are pure functions. **No function on the decision path raises.** Every fai
 
 ```text
 SCHEMA_VERSION: int = 1
-READ_FAILURE_REASONS: frozenset[str]          # §1.2, exactly nine
+READ_FAILURE_REASONS: frozenset[str]          # §1.2, exactly eight (Architect round 1)
+REMOTE_CMD_TEMPLATE: str = "env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN {claude_bin} -p /usage"
+    # Architect round 1: the single source of the remote command. read_usage, --check
+    # item 2 and --print-setup all format it. One code line, trailing comment
+    # "# ADR-1944 AD-5: the only /usage call site (T4.1b)".
+SSH_OPTIONS: tuple[str, ...]                  # the AD-6 -o list, verbatim and in AD-6 order
+KILL_GRACE_SECONDS: int = 5                   # AD-6's --kill-after=5, now in Python
+
+read_usage(*, claude_bin: str, key_path: Path, timeout_s: int,
+           stdout_path: Path, stderr_path: Path) -> ReadOutcome   # Architect round 1; never raises
+    argv = ["ssh", "-n", "-i", str(key_path), *SSH_OPTIONS, "127.0.0.1",
+            REMOTE_CMD_TEMPLATE.format(claude_bin=claude_bin)]   # list argv; no local shell
+    Popen(argv, stdin=DEVNULL, stdout=<stdout_path fh>, stderr=<stderr_path fh>,
+          start_new_session=True, env=<os.environ minus the three credential vars>)
+    wait(timeout=timeout_s). On TimeoutExpired: os.killpg(pid, SIGTERM), wait(KILL_GRACE_SECONDS);
+    if still alive: os.killpg(pid, SIGKILL), wait(). ProcessLookupError is ignored.
+    ReadOutcome(kind: "exited"|"timeout"|"spawn_failed", rc: int|None, detail: str|None)
+    spawn_failed = OSError from Popen (e.g. ssh not on PATH).
 UNUSABLE_REASONS: frozenset[str]              # §1.2, exactly seven
 DEFAULTS: Mapping[str, int|str|None]          # §1.8
 INPUT_CAP_BYTES: int = 65536
@@ -396,7 +417,7 @@ decode_usage_bytes(raw: bytes) -> str
     and CSI (\x1b\[[0-9;?]*[ -/]*[@-~]) escapes → delete '\r'. Locale-independent.
 
 parse_usage(text: str) -> ParseResult              # never raises; §3.2–3.3
-classify_transport(rc: int) -> str | None          # §3.3
+classify_transport(outcome: ReadOutcome) -> str | None   # §3.3 (Architect round 1: takes ReadOutcome, not rc)
 load_settings(path: Path) -> SettingsResult        # never raises; §1.8
 read_status(path: Path) -> StatusRead              # never raises; §3.5
 evaluate(status: StatusRead, settings: SettingsResult, now: float, *,
@@ -462,11 +483,16 @@ The percentages are uncapped integers. `150` is accepted as-is. `48.5%` does not
 4. Weekly-all matched only → `missing_session`.
 5. Otherwise → `unparseable`. This covers the empty string.
 
-`classify_transport(rc)` returns `timeout` for 124 and 137 (the `--kill-after` SIGKILL). It returns `ssh_failed` for 255, 125, 126 and 127 (ssh failure, a timeout-wrapper error, or ssh not executable / not found). It returns `None` for everything else.
+~~`classify_transport(rc)` returns `timeout` for 124 and 137 … `ssh_failed` for 255, 125, 126 and 127 …~~ **Architect round 1:** `classify_transport(outcome: ReadOutcome)` returns:
+- `timeout` for `kind=timeout`. This is observed directly and no longer inferred from an exit code, so a remote exit of 124 is no longer misread as a timeout;
+- `ssh_failed` for `kind=spawn_failed`, and for `kind=exited` with `rc == 255`;
+- `None` otherwise.
+
+A remote `127` (claude missing on the far side) is now a content failure (`unparseable`, with `detail` carrying stderr), not `ssh_failed`. The local P6 check is the primary `claude_not_executable` path.
 
 `poll-record` combines the two (§3.6):
 - A **pre-ssh refusal** (`--transport-reason`) wins.
-- Otherwise, `classify_transport(rc)` not `None` wins. Stdout is not parsed then: a killed or failed transport is a failure even if partial text parsed.
+- Otherwise, `classify_transport` not `None` wins. Stdout is not parsed then: a killed or failed transport is a failure even if partial text parsed.
 - Otherwise the content classification decides, including when `rc` is a non-zero remote exit other than the codes above. `remote_exit` is recorded either way. AD-4 binds "not the exit code". The FR-11 tension is TD-O-3.
 - `detail` on failure is the first 200 sanitized characters of stderr, or of stdout for content failures, prefixed `stderr:`/`stdout:`.
 
@@ -517,8 +543,11 @@ Notes on the table:
 hos-usage-poll                 # one poll (crontab)
 hos-usage-poll --check         # preflight; read-only (§3.8)
 hos-usage-poll --print-setup   # prints setup artifacts; never mutates (§3.9)
-hos-usage-poll --help          # first description line, verbatim (TD-VF-13):
-                               #   "Reads Claude subscription usage by running `claude -p /usage` over SSH loopback (ADR-1944)."
+hos-usage-poll --help          # first description line, verbatim (Architect round 1):
+                               #   "Reads Claude subscription usage (/usage) over SSH loopback (ADR-1944); the read itself is bin/lib/usage_pause.py read-usage."
+                               # The bash file must NOT contain the literal `claude -p`. The literal now
+                               # lives only in usage_pause.py: its module docstring's first line names
+                               # `claude -p /usage`, so T4.1 matches that one file deterministically (TD-VF-13, retargeted).
 ```
 
 **Exit codes:**
@@ -535,24 +564,21 @@ hos-usage-poll --help          # first description line, verbatim (TD-VF-13):
   - Install `trap _on_exit EXIT` (P11).
 - **P4. Parameters.** Run `python3 "$_LIB" poll-params`. It prints exactly three lines, `read_timeout_seconds=<int>`, `claude_bin=<abs path or empty>` and `settings_status=<…>`. Read them with `while IFS='=' read -r k v` plus a `case`. **Never `eval`/`source`.**
   - Any other output, or `rc≠0` → `_TRANSPORT_REASON=crashed`, `detail="poll-params failed"`, then go to P9.
-- **P5. Timeout binary.** `_TIMEOUT_BIN` = `timeout`, else `gtimeout` (`command -v`), else empty. Empty → `_TRANSPORT_REASON=no_timeout_binary`, go to P9. **The read is refused, never run unbounded** (FR-7).
+- ~~**P5. Timeout binary.**~~ **Architect round 1: P5 is deleted.** The bound is `read_usage`'s `wait(timeout)` plus a process-group SIGTERM/SIGKILL (§3.1). It is always available, so FR-7 holds with no coreutils dependency on macOS. The poller assigns no `_TIMEOUT_BIN` and calls no `timeout`/`gtimeout`.
 - **P6. claude.** An empty `claude_bin`, or one that is not `-x` → `_TRANSPORT_REASON=claude_not_executable`, go to P9. The path is local, and the same path is used remotely: same host, same user.
 - **P7. Key.** `$HOME/.ssh/hos_loopback` not a readable regular file → `_TRANSPORT_REASON=ssh_failed`, `detail="loopback key missing"`, go to P9.
-- **P8. The read.** It is built as a bash array, with no `eval`:
+- **P8. The read (Architect round 1, TD-O-1: done in Python, not as a bash `timeout … ssh` pipeline).**
   ```
-  _REMOTE_CMD="env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN ${_CLAUDE_BIN} -p /usage"
-  "$_TIMEOUT_BIN" --kill-after=5 "$_READ_TIMEOUT" \
-    ssh -n -i "$HOME/.ssh/hos_loopback" \
-        -o BatchMode=yes -o IdentitiesOnly=yes -o RequestTTY=no \
-        -o ConnectTimeout=10 -o ServerAliveInterval=10 -o ServerAliveCountMax=3 \
-        -o StrictHostKeyChecking=yes -o LogLevel=ERROR \
-        127.0.0.1 "$_REMOTE_CMD" \
-    > "$_STATE/usage-pause/poll.stdout.tmp" 2> "$_STATE/usage-pause/poll.stderr.tmp"
-  _RC=$?
+  _READ_LINE="$(python3 "$_LIB" read-usage --timeout "$_READ_TIMEOUT" --claude-bin "$_CLAUDE_BIN" \
+      --key "$HOME/.ssh/hos_loopback" \
+      --stdout "$_STATE/usage-pause/poll.stdout.tmp" --stderr "$_STATE/usage-pause/poll.stderr.tmp")"
   ```
-  - The `_REMOTE_CMD=` assignment is a **single code line, byte-for-byte as above**, with a trailing comment `# ADR-1944 AD-5: the only /usage call site (T4.1b)`. The `_CLAUDE_BIN` variable is assigned from `claude_bin` in P4.
-  - There is exactly one `ssh` invocation in the file.
-- **P9. Record.** Run `python3 "$_LIB" poll-record --rc "$_RC" --stdout <path> --stderr <path> [--transport-reason <r>] [--detail <text>] [--diagnostics "$_DIAG"]`. The stdout/stderr paths are omitted when P8 did not run.
+  - `read-usage` calls `read_usage()` (§3.1). It prints **exactly one** line matching `^read=(exited|timeout|spawn_failed) rc=([0-9]+|-)$` and exits 0.
+  - Any other output, or a non-zero exit, → `_TRANSPORT_REASON=crashed`, `detail="read-usage failed"`, then P9.
+  - The ssh argv is the AD-6 argv with no `timeout` prefix: `ssh -n -i <key> <SSH_OPTIONS> 127.0.0.1 <REMOTE_CMD_TEMPLATE formatted>`. It is a Python list, with no local shell and no `eval`.
+  - `REMOTE_CMD_TEMPLATE` is a **single code line in `usage_pause.py`**, byte-for-byte as in §3.1, carrying the trailing comment `# ADR-1944 AD-5: the only /usage call site (T4.1b)`.
+  - There is exactly one `Popen`/`subprocess` call that runs `ssh` in the module, and **no `ssh` invocation in `bin/hos-usage-poll`**.
+- **P9. Record.** Run `python3 "$_LIB" poll-record --read <exited|timeout|spawn_failed> --rc <n|-> --stdout <path> --stderr <path> [--transport-reason <r>] [--detail <text>] [--diagnostics "$_DIAG"]`. The `--read`/`--rc` and stdout/stderr arguments are omitted when P8 did not run.
   - `poll-record` reads ≤ 64 KiB of each stream, classifies (§3.3), builds the reading with carry-over (§1.3), evaluates `machine_decision` with `now = run_epoch` (never stale), and writes `reading.status` atomically.
   - It prints one summary line, `[hos-usage-poll] <iso> outcome=<o> [reason=<r>] [session=<n> weekly=<n>] decision=<d> (<reason>)`, and exits 0 on a successful write and 1 otherwise.
   - On exit 0, set `_WROTE=1`.
@@ -567,8 +593,8 @@ hos-usage-poll --help          # first description line, verbatim (TD-VF-13):
 
 ### 3.7 SSH, credential hygiene, time bound — summary of what is binding
 
-- The argv in P8 is the AD-6 argv verbatim.
-- The worst-case run is about 75 s plus local I/O.
+- The argv in P8 is the AD-6 argv verbatim, minus the `timeout` prefix. The bound moved into `read_usage` (Architect round 1; ADR Amendment 1 A1-2).
+- The worst-case run is about 75 s plus local I/O: 60 s, then SIGTERM to the process group, then 5 s grace, then SIGKILL.
 - `-n` and `RequestTTY=no` mean no stdin and no pty (FR-5).
 - `StrictHostKeyChecking=yes` means a changed host key yields `ssh_failed`.
 - The **remote** `env -u` strips the three variables even if the remote shell's startup files set them (AC-15).
@@ -590,12 +616,14 @@ Output is one line per item, `PASS|FAIL|SKIP|INFO  <n>  <text>[ — <remedy>]`, 
    - Its schedule must be `*/N * * * *` with `N*60 == poll_interval_seconds` (or `0 * * * *` when the interval is 3600).
    - Its redirect must not contain `>>` (FR-34).
    - The path must equal this script's absolute path. `crontab` absent or `crontab -l` failing → FAIL.
-6. One real loopback read, P5–P8 into the temp dir, then `python3 "$_LIB" classify --rc <rc> --stdout <f> --stderr <f>`. That prints `SUCCESS session=<n> weekly=<n>` or `FAILED reason=<r> detail=<…>`. PASS iff `SUCCESS`. This also reports INFO `stderr non-empty (<k> bytes)`.
+6. One real loopback read, P6–P8 (`read-usage`) into the temp dir, then `python3 "$_LIB" classify --read <k> --rc <rc> --stdout <f> --stderr <f>` (Architect round 1). That prints `SUCCESS session=<n> weekly=<n>` or `FAILED reason=<r> detail=<…>`. PASS iff `SUCCESS`. This also reports INFO `stderr non-empty (<k> bytes)`.
 7. (S3) Export. If `/var/lib/hos-usage` does not exist → SKIP `export not configured`. Otherwise:
    - the directory is writable by the current user, **and**
    - **exactly one** of these holds: (a) `/var/lib/prometheus/node-exporter/hos_claude_usage.prom` is a symlink resolving (`realpath`) to `/var/lib/hos-usage/hos_claude_usage.prom`; (b) `/etc/default/prometheus-node-exporter`'s `ARGS` contains `--collector.textfile.directory=/var/lib/hos-usage` (fallback (i)).
    - Both → FAIL `duplicate export path (node_exporter would read the file twice)`. Neither → FAIL `symlink missing — re-run the §2a.7 root step (a release upgrade may have purged node_exporter)`.
    - INFO reports `systemctl is-active prometheus-node-exporter` when `systemctl` exists.
+
+*Architect round 1:* item 2's expected `command=` value, and every forced-command line `--print-setup` prints (§3.9 block 3), are obtained from `python3 "$_LIB" remote-cmd --claude-bin <path>`. That subcommand prints `REMOTE_CMD_TEMPLATE` formatted. `bin/hos-usage-poll` never spells `-p /usage` itself, so T4.1b's single call site stays `usage_pause.py`, and the forced command cannot drift from what the poller actually sends.
 
 ### 3.9 `--print-setup` — prints, never mutates
 
@@ -618,10 +646,11 @@ S1 adds `bin/hos-usage-poll` and `bin/lib/usage_pause.py` to `framework_consumer
 
 ### 3.11 T4.1, T4.1b, T4.2 (in `tests/framework/test_agent_invocation_migration.py`)
 
-- **T4.1:** add `"bin/hos-usage-poll",  # EXEMPT (permanent, ADR-1944 AD-5): non-agent /usage read over SSH loopback; argv pinned by T4.1b.` to `_T4_1_EXPECTED_EXEMPTIONS`, and add a line to the exemption comment block naming ADR-1944 AD-5. The match is guaranteed by the `--help` line (TD-VF-13).
-- **`test_T4_1b_usage_read_has_one_call_site`:** over code lines (`_code_lines`) of `scripts/`, `bootstrap/`, `bin/`, the regex `(?:-p|--print)\s+["']?/usage\b` matches **only** in `bin/hos-usage-poll`.
-- **`test_T4_1b_remote_command_is_exact`:** `bin/hos-usage-poll` has exactly one code line matching `^\s*_REMOTE_CMD=`. Stripped of its trailing comment, it equals `_REMOTE_CMD="env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN ${_CLAUDE_BIN} -p /usage"`. The file has no code line matching `--model|--json-schema|--agent`.
-- **T4.2:** add `bin/hos-usage-poll` to `_T4_2_EXPECTED_TIMEOUT_BIN_COPIES` and rename the test to `…_is_exactly_four` (TD-VF-4).
+*Architect round 1 (TD-O-1): this subsection is rewritten. The call site is `bin/lib/usage_pause.py`.*
+- **T4.1:** add `"bin/lib/usage_pause.py",  # EXEMPT (permanent, ADR-1944 AD-5): non-agent /usage read over SSH loopback; argv pinned by T4.1b.` to `_T4_1_EXPECTED_EXEMPTIONS`, and add a line to the exemption comment block naming ADR-1944 AD-5. The match is guaranteed by the module docstring's first line, which names `claude -p /usage` literally (TD-VF-13, retargeted). `bin/hos-usage-poll` must **not** match T4.1.
+- **`test_T4_1b_usage_read_has_one_call_site`:** over code lines (`_code_lines`) of `scripts/`, `bootstrap/`, `bin/`, the regex `(?:-p|--print)\s+["']?/usage\b` matches **only** in `bin/lib/usage_pause.py`.
+- **`test_T4_1b_remote_command_is_exact`:** `bin/lib/usage_pause.py` has exactly one code line matching `^REMOTE_CMD_TEMPLATE\s*=`. Stripped of its trailing comment, it equals `REMOTE_CMD_TEMPLATE = "env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN {claude_bin} -p /usage"`. Neither `bin/lib/usage_pause.py` nor `bin/hos-usage-poll` has a code line matching `--model|--json-schema|--agent`.
+- **T4.2: no change.** Neither file assigns `_TIMEOUT_BIN`. `test_T4_2_private_timeout_bin_copy_ledger_is_exactly_three` stays as it is and passes unmodified. That is the point of the override.
 
 ### 3.12 Runbook — `docs/CRON-SETUP.md` §2a "Usage-pause poller (SSH loopback)" (inserted after §2, before §3)
 
@@ -700,8 +729,10 @@ Any exception, or a failed write in step 8, → nothing on stdout, a one-line tr
 
 ### 4.3 The bash block — contract (steps G1–G6)
 
-- **G1.** `_UP_BOUND=()`. If `timeout` exists: `_UP_BOUND=(timeout 60)`. Else if `gtimeout` exists: `_UP_BOUND=(gtimeout 60)`. This is **not** a `_TIMEOUT_BIN=` assignment, so the T4.2 ledger for `bin/hos-cron` is unchanged. Then `mkdir -p "$_HOS_DIR/usage-pause"` (failure ignored).
-- **G2. Ask.** Run `_UP_LINE="$("${_UP_BOUND[@]}" python3 "$_HOS_CRON_DIR/lib/usage_pause.py" check --role "$ROLE" --project "$PROJECT" 2>&2)"`, recording `rc`, inside an `if` so `set -e` cannot fire (Python's stderr goes to the cron log). Then match `_UP_LINE` against the §4.2 ERE.
+- **G1.** `_UP_BOUND=()`. If `timeout` exists: `_UP_BOUND=(timeout --kill-after=5 60)`. Else if `gtimeout` exists: `_UP_BOUND=(gtimeout --kill-after=5 60)` (*Architect round 1:* `--kill-after` added, to match AD-6's discipline). This is **not** a `_TIMEOUT_BIN=` assignment, so the T4.2 ledger for `bin/hos-cron` is unchanged (`bin/hos-cron` is already in it in any case). Then `mkdir -p "$_HOS_DIR/usage-pause"` (failure ignored).
+  - **Architect round 1, binding:** every expansion of the array is written `${_UP_BOUND[@]+"${_UP_BOUND[@]}"}`, never a bare `"${_UP_BOUND[@]}"`. In bash before 4.4 (which includes macOS `/bin/bash` 3.2 when Homebrew bash is not first on PATH), the bare form on an empty array under `set -u` (`hos-cron:116`) is a fatal "unbound variable". That would abort hos-cron at the gate on every macOS host without coreutils. Static test `S2-ST5 test_up_bound_expansions_are_set_u_safe`. The expansions in §4.4 follow the same rule.
+- **G2. Ask.** Run `_UP_LINE="$(${_UP_BOUND[@]+"${_UP_BOUND[@]}"} python3 "$_HOS_CRON_DIR/lib/usage_pause.py" check --role "$ROLE" --project "$PROJECT")"`, recording `rc`, inside an `if` so `set -e` cannot fire. Python's stderr is inherited and goes to the cron log; the draft's `2>&2` was a no-op and is dropped. Then match `_UP_LINE` against the §4.2 ERE.
+  - **Architect round 1, binding:** the `[[ =~ ]]` match runs inside a helper function that declares `local LC_ALL=C` first. Bracket ranges (`[a-z]`, `[ -~]`) are then byte ranges, whatever the cron locale. A locale-induced mismatch could only fail safe (`check_error`), but a spurious `check_error` pause is a loud false positive, and this costs one line.
   - **If `rc≠0` or there is no match:** set `decision=pause reason=check_error transition=none degraded=0 file_pause_issue=1` (all other actions 0) and `summary="usage-pause check helper failed (rc=<rc>)"`, and `touch "$_HOS_DIR/usage-pause/check-error-${ROLE}-${_project_safe}.flag"`. **The pause stands regardless of `fail_mode`** (AD-7.5). A missing or broken `bin/lib/usage_pause.py` lands here.
 - **G3. Log.**
   - Pause: `echo "$LOG_PREFIX [PAUSED-USAGE] <summary> (reason=<reason>)"`.
@@ -718,18 +749,20 @@ The block contains **no** reference to `suspend`, `hos-suspend`, `.prom`, `node_
 This function is defined inside the block (all `_up_*` names) and only runs on paths the verdict asks for. On a normal run cycle with nothing pending it makes **zero** GitHub calls. On paused cycles after the issue is recorded it also makes zero calls.
 
 1. If `_REPO_SLUG` is empty, or `command -v gh` fails: log `WARN: usage-pause issue actions skipped (no repo slug / gh)` and return 0. The pause still applies.
-2. **Complete dedup query** `_up_find <title>`:
+2. **Complete dedup query** `_up_find <title>`. *Architect round 1:* the draft piped into a standalone `jq`. `bin/hos-cron` never depends on standalone `jq`; every existing query uses `gh --jq`, and consumers are not required to have `jq`. On a host without `jq`, the dedup query would fail on every cycle, so no pause issue would ever be filed. That would be fail-closed, but FR-37 would be silently dead. Replaced with:
    ```
-   "${_UP_BOUND[@]}" gh api --paginate "repos/${_REPO_SLUG}/issues?state=open&labels=needs-human&per_page=100" \
-     | jq -r --arg t "<title>" '.[] | select(.pull_request == null and .title == $t) | .number'
+   _up_raw="$(${_UP_BOUND[@]+"${_UP_BOUND[@]}"} gh api --paginate "repos/${_REPO_SLUG}/issues?state=open&labels=needs-human&per_page=100" \
+     --jq '.[] | select(.pull_request == null) | "\(.number)\t\(.title)"')"
    ```
-   It runs under the script's `pipefail`. Success requires a 0 exit from the pipeline **and** every output line matching `^[0-9]+$`. Otherwise it is a query failure: log `WARN: usage-pause dedup query failed — no filing this cycle (fail-closed)` and do not file. `--paginate` follows every page and errors if any page fails, so a result is never truncated (TD-VF-2). The match is exact-title (TD-VF-7).
+   - Success requires `gh` to exit 0 **and** every non-empty output line to match `^[0-9]+<TAB>`. Otherwise it is a query failure: log `WARN: usage-pause dedup query failed — no filing this cycle (fail-closed)` and do not file.
+   - The **exact-title comparison is done in bash** (`[[ "${line#*$'\t'}" == "$title" ]]`, inside the `local LC_ALL=C` helper). It is not done in jq, because the title contains operator-supplied `${PROJECT}` and must never be interpolated into a jq program.
+   - `--paginate` follows every page and errors if any page fails, so a result is never truncated (TD-VF-2). `gh` applies `--jq` per page. The match is exact-title (TD-VF-7).
 3. **Issue lock.** `mkdir "$_HOS_DIR/locks/usage-pause-issue-${_project_safe}.lock"`. If it exists and is < 600 s old: log `usage-pause issue lock held — skipping this cycle` and skip the filing **and** close actions. If it is ≥ 600 s old, reclaim it. Release it at the end of the function (`rm -rf`), on every path.
 4. **File pause** (`file_pause_issue=1`):
    - Run `_up_find "$_USAGE_PAUSE_TITLE"`.
    - If it returns at least one number: `record --pause-issue <lowest>` and log `usage-pause issue already open (#N)`.
    - If it returns none: render the body. For a normal verdict use `issue-body --kind paused`. For `check_error`, bash writes the body with `printf` to the same fixed path; it names the rc, says every cycle on `<project>` is paused regardless of `fail_mode`, and gives the hand-run command.
-   - Then `"${_UP_BOUND[@]}" gh issue create --repo "$_REPO_SLUG" --title "$_USAGE_PAUSE_TITLE" --label needs-human --body-file <path>`. Parse the number from the URL (`/issues/([0-9]+)$`). On success, `record --pause-issue N`, skipped for `check_error`, and log `filed usage-pause issue #N`. On failure log a WARN; the next paused cycle retries.
+   - Then `${_UP_BOUND[@]+"${_UP_BOUND[@]}"} gh issue create --repo "$_REPO_SLUG" --title "$_USAGE_PAUSE_TITLE" --label needs-human --body-file <path>`. Parse the number from the URL (`/issues/([0-9]+)$`). On success, `record --pause-issue N`, skipped for `check_error`, and log `filed usage-pause issue #N`. On failure log a WARN; the next paused cycle retries.
 5. **Close pause** (`close_pause_issues=1`):
    - `_up_find` the title. Render `issue-body --kind paused-resolved`.
    - For each number: `gh issue comment N --repo … --body-file <path>`, **then** `gh issue close N --repo …`, each bounded.
@@ -773,9 +806,11 @@ This function is defined inside the block (all `_up_*` names) and only runs on p
    ```
    *"--paginate"*"labels=needs-human&per_page=100"*)
      [[ -n "${HOS_TEST_USAGE_PAUSE_QUERY_FAIL:-}" ]] && exit 1
-     printf '%s' "${HOS_TEST_USAGE_PAUSE_ISSUES_JSON:-[]}" ;;
+     printf '%b' "${HOS_TEST_USAGE_PAUSE_ISSUES:-}" ;;   # Architect round 1: pre-rendered "N\tTitle\n" lines (the stub cannot run --jq)
    ```
-   No existing launcher query uses `--paginate` (grep-verified). `HOS_TEST_USAGE_PAUSE_ISSUES_JSON` may hold several concatenated arrays (`[…][…]`), which is what `gh --paginate` emits for multiple pages. Also add `HOS_TEST_GH_ISSUE_CREATE_FAIL` to the existing `issue create` branch (`exit 1` before printing the URL) and record `issue comment` with `--body-file`.
+   No existing launcher query uses `--paginate` (grep-verified). *Architect round 1:* `HOS_TEST_USAGE_PAUSE_ISSUES` holds the post-`--jq` lines. Paging itself is `gh`'s job; the harness instead asserts the recorded argv carries `--paginate` and `per_page=100`. Also add `HOS_TEST_GH_ISSUE_CREATE_FAIL` to the existing `issue create` branch (`exit 1` before printing the URL) and record `issue comment` with `--body-file`.
+
+4. **Copied-launcher tests (Architect round 1).** Every test that copies `bin/hos-cron` elsewhere and runs the copy also copies `bin/lib/usage_pause.py` into the copy's `bin/lib/`, and writes a fresh reading under that test's `HOS_STATE_DIR`. Known sites are `test_hos_cron.py:1768-1839` (`REAL_GIT_CREDS_LIB` pattern); the coder greps `shutil.copy(HOS_CRON` across `tests/` for the full set. Without this, those tests hit `check_error` and pause. The fix belongs in the harness, never in the gate.
 
 ### 4.7 Docs in S2
 
@@ -1027,12 +1062,16 @@ Every test listed runs in the PR suite (`not slow and not integration`) unless m
 - `test_no_weekly_model_line_absent`.
 - `test_label_sanitization`.
 - `test_window_length_never_parsed` — no `2h`/`5h` literal in the module; reset text is free-form (FR-20).
-- `test_classify_transport` — 124 and 137 → timeout; 255/125/126/127 → ssh_failed; 0/1/2 → None (AC-6, AC-7).
+- `test_classify_transport` — *(Architect round 1)* `read=timeout` → timeout; `read=spawn_failed` and `exited rc=255` → ssh_failed; `exited` with rc 0/1/2/124/127 → None (AC-6, AC-7).
+- `test_read_usage_timeout_kills_process_group` — *(Architect round 1)* calls `read_usage(timeout_s=1)` directly against a stub `ssh` that forks a sleeping grandchild. Within ~1 s + grace it returns `kind=timeout`, and neither process survives (FR-7, AC-7, fast).
+- `test_read_usage_spawn_failed` — `ssh` absent from PATH → `kind=spawn_failed`, no raise.
+- `test_read_usage_env_strips_credentials` — the child env lacks the three variables even when the caller's env has them (FR-4).
+- `test_project_sanitize_matches_tr_bytewise` — for ASCII and non-ASCII names, the Python sanitizer equals `printf '%s' X | tr -c 'A-Za-z0-9._-' '-'` (§1.1).
 
 **`test_usage_pause_settings.py`**
 - `test_missing_file_defaults` (FR-18, FR-29).
 - `test_each_key_valid_bounds` — parametrized, both edges.
-- `test_each_key_invalid` — parametrized: 0, 101, `8O`, `090`, `+90`, `90 # c`, empty, Unicode digit, `fail_mode=Closed`, interval 90, interval 3660, staleness 360 (≤ 300+60), staleness 3601, timeout 4, timeout 271, relative `claude_bin`, `claude_bin` with a space or `/../` → `invalid:<key>` (Q11, FR-30).
+- `test_each_key_invalid` — parametrized: 0, 101, `8O`, `090`, `+90`, `90 # c`, empty, Unicode digit, `fail_mode=Closed`, interval 90, interval 3660, staleness 360 (≤ 300+60), staleness 7201 (Architect round 1), timeout 4, timeout 271, relative `claude_bin`, `claude_bin` with a space or `/../` → `invalid:<key>` (Q11, FR-30).
 - `test_unknown_key_invalid` — `sesion_threshold`.
 - `test_duplicate_key_invalid`.
 - `test_malformed_line_invalid_line_n`.
@@ -1081,10 +1120,10 @@ Tests:
 - `test_poll_ssh_argv_matches_ad6`.
 - `test_poll_strips_credentials` — caller exports all three variables; the claude stub sees none; the poller's own env too (AC-15, FR-4).
 - `test_poll_ssh_255_ssh_failed`, `test_poll_key_missing_ssh_failed` (AC-6).
-- `test_poll_no_timeout_binary_refused` (FR-7) — PATH without timeout/gtimeout.
+- ~~`test_poll_no_timeout_binary_refused`~~ *(Architect round 1: removed with `no_timeout_binary`.)* Replaced by `test_poll_needs_no_timeout_binary`: with PATH lacking `timeout`/`gtimeout`, the poll still succeeds (FR-7 via `read_usage`).
 - `test_poll_claude_not_executable`.
 - `test_poll_timeout` — **slow**: read_timeout 5, stub sleeps 60 (AC-7).
-- `test_poll_rc124_and_137_classified_timeout` — fast: stub ssh exits 124/137 (AC-7 in the PR suite).
+- `test_poll_remote_124_is_not_timeout` — *(Architect round 1)* stub ssh exits 124 promptly with the D-1 text → success with `remote_exit=124`. A remote exit code is no longer read as a timeout.
 - `test_poll_nonzero_remote_exit_content_decides` (AD-4 / TD-O-3).
 - `test_poll_failure_overwrites_success` (FR-32, AC-13).
 - `test_poll_three_runs_dir_bounded` — mixed outcomes, directory listing equals the §1.1 set, files below 8 KiB (AC-13, FR-34).
@@ -1108,11 +1147,12 @@ Tests:
 - `S1-ST1 test_no_claude_auth_env_or_token_assignment` — code lines of the poller and module: no `claude-auth.env`, no `CLAUDE_CODE_OAUTH_TOKEN=`, no `source`/`.` of `~/.config/hos` (AC-15).
 - `S1-ST2 test_poller_and_lib_never_reference_suspend_or_halt` — no `suspend`, `hos-halt`, `projects.conf` (FR-24, AC-27).
 - `S1-ST3 test_lib_never_uses_hos_config_dir`.
-- `S1-ST4 test_lib_stdlib_only` — the AST imports are a subset of `{__future__, argparse, dataclasses, datetime, os, pathlib, re, shutil, stat, sys, time, typing}`.
+- `S1-ST4 test_lib_stdlib_only` — the AST imports are a subset of `{__future__, argparse, dataclasses, datetime, os, pathlib, re, shutil, signal, stat, subprocess, sys, time, typing}`. *Architect round 1:* `signal` and `subprocess` added for `read_usage`.
 - `S1-ST5 test_sandbox_allowwrite_excludes_decision_inputs` — with `__HOME__`→`/h`, no `allowWrite` entry is a path-prefix of `/h/.hos/usage-pause/reading.status`, `/h/.config/hos/usage-pause.conf` or `/var/lib/hos-usage/x` (AF-1).
 - `S1-ST6 test_consumer_files_list_both`.
 - `S1-ST7 test_test_only_overrides_absent_from_runbook` — `HOS_USAGE_PAUSE_CONF`/`HOS_USAGE_PROM_PATH` do not appear in `docs/CRON-SETUP.md`.
-- `S1-ST8 test_poller_has_one_ssh_invocation`.
+- `S1-ST8 test_poller_has_one_ssh_invocation` — *(Architect round 1)* `bin/hos-usage-poll` has **no** `ssh` invocation, `usage_pause.py` has exactly one `subprocess`/`Popen` call site, and neither file assigns `_TIMEOUT_BIN` or invokes `timeout`/`gtimeout`.
+- `S1-ST9 test_staleness_range_nonempty_for_every_interval` — *(Architect round 1)* for every valid `poll_interval_seconds` there is a valid `(read_timeout_seconds, staleness_seconds)` pair.
 
 **`test_agent_invocation_migration.py`:** T4.1 (updated), `test_T4_1b_usage_read_has_one_call_site`, `test_T4_1b_remote_command_is_exact`, T4.2 (updated) (AD-5, AC-26).
 
@@ -1147,7 +1187,7 @@ Tests:
 - `test_five_paused_cycles_one_issue` (AC-14).
 - `test_dedup_query_failure_no_issue_still_paused` (AC-14).
 - `test_issue_create_failure_still_paused_then_retries` (FR-37).
-- `test_dedup_reads_all_pages` — the only match is in the second concatenated array (TD-VF-2).
+- `test_dedup_query_paginates` — the recorded gh argv contains `--paginate`, `per_page=100` and a `--jq` filter, and no `jq` process is spawned (TD-VF-2; Architect round 1).
 - `test_exact_title_not_prefix` — an open issue titled `…paused on hos-dev` does not dedup `hos` (TD-VF-7).
 - `test_threshold_80_applies_without_new_poll_all_projects` — conf changed after the reading was written; `hos` and a second registered project both pause (AC-23, FR-27).
 - `test_transcript_wording_never_pauses` — `HOS_TEST_CLAUDE_STDOUT="Claude usage limit reached"` across two cycles plus an under-threshold reading → both run (AC-24, FR-28).
@@ -1171,6 +1211,8 @@ Tests:
 - `S2-ST2 test_gate_between_git_creds_and_claude_auth` — the block's line range is after the `hos_configure_git_credentials` block and before `# ── Claude Code subscription auth`.
 - `S2-ST3 test_reactive_breaker_code_unchanged` — sha256 of `bin/hos-cron` lines from `# ── DISABLED 2026-09-01 (operator request)` up to `# ── Post-cycle bookkeeping`, and of the `# #1446: symmetry with the timeout-breaker auto-close above` paragraph through its closing `fi`, equal the values recorded from the S2 base commit. `TestUsageLimitBreaker` is still decorated `@pytest.mark.skip` (AC-17, FR-40).
 - `S2-ST4 test_check_invoked_once` — exactly one `usage_pause.py" check` in `bin/hos-cron`.
+- `S2-ST5 test_up_bound_expansions_are_set_u_safe` — *(Architect round 1)* inside the gate block, every `_UP_BOUND` expansion is `${_UP_BOUND[@]+"${_UP_BOUND[@]}"}`. There is no standalone `jq` invocation, and the ERE match sits in a function with `local LC_ALL=C`.
+- `test_gate_runs_on_bash_without_timeout` (in `TestUsagePauseGate`) — PATH with no `timeout`/`gtimeout` plus an under-threshold reading → the cycle runs, with no `unbound variable` error.
 
 ### 7.3 S3 tests
 
@@ -1232,7 +1274,7 @@ There is no listening socket: no module or poller code line contains `socket`, `
 | FR-4 | §3.6 P1/P8, §3.7 | `test_poll_strips_credentials`, S1-ST1 |
 | FR-5 | §3.6 P8 (`-n`, `RequestTTY=no`) | `test_poll_ssh_argv_matches_ad6` |
 | FR-6 | §3.6 P1, §3.4 | `test_poll_success_writes_reading` (minimal incoming PATH) |
-| FR-7 | §3.6 P5/P8 | `test_poll_no_timeout_binary_refused`, `test_poll_timeout` |
+| FR-7 | §3.1 `read_usage`, §3.6 P8 (Architect round 1) | `test_read_usage_timeout_kills_process_group`, `test_poll_needs_no_timeout_binary`, `test_poll_timeout` |
 | FR-8 | §1.8, §3.8 item 5, §3.9 | `test_print_setup_crontab_matches_interval`, `test_check_crontab_interval_mismatch_fails` |
 | FR-9 | §3.6 P8, §3.11 | `test_poll_claude_argv_exactly_dash_p_usage`, T4.1b |
 | FR-10 | §3.2 | `test_usage_pause_parse.py` (all) |
@@ -1282,7 +1324,7 @@ There is no listening socket: no module or poller code line contains `socket`, `
 | AC-4 | §3.3, §1.3, §5.2 | `test_empty_session_*`, `test_failure_reading_has_no_pct_keys`, `test_failure_render_absent_values`, `test_empty_session_reading_pauses_closed` |
 | AC-5 | §3.3 | `test_session_only_missing_weekly`, `test_weekly_only_missing_session` |
 | AC-6 | §3.3, §3.6 P7 | `test_poll_ssh_255_ssh_failed`, `test_poll_key_missing_ssh_failed` |
-| AC-7 | §3.6 P8 | `test_poll_timeout` (slow), `test_poll_rc124_and_137_classified_timeout` |
+| AC-7 | §3.1, §3.6 P8 | `test_poll_timeout` (slow), `test_read_usage_timeout_kills_process_group` (fast) |
 | AC-8 | §3.5 | `test_each_unusable_reason_distinct`, `test_unusable_reasons_distinct` |
 | AC-9 | §3.5 R16 | `test_failopen_failure_runs_and_records`, `test_failure_render_absent_values` |
 | AC-10 | §4.5 | `test_auto_resume_next_cycle_closes_issue` |
@@ -1327,14 +1369,60 @@ There is no listening socket: no module or poller code line contains `socket`, `
 
 **No AD was found unimplementable.** The two internal tensions are TD-O-3 (FR-11 vs AD-4) and TD-O-6 (AD-10's "always" vs invalid settings). TD-VF-4 is a test collision the ADR did not foresee, not a contradiction.
 
+### 9.1 Architect round 1 rulings (binding; AD changes recorded in ADR-1944 Amendment 1)
+
+- **TD-O-1: OVERRIDE. Bound the read in Python.**
+  - A permanent T4.2 entry would put a non-AI read into a ledger whose purpose is AD-16.6's AI-review timeout copies. That widens a governance ledger for an unrelated concern.
+  - The Python version is no more complex: one `Popen` with `start_new_session=True`, `wait(timeout)`, then `killpg` TERM→KILL.
+  - It is strictly better on three counts. Timeout is *observed*, not inferred from exit code 124/137, which a remote process could also return. The macOS coreutils dependency and the `no_timeout_binary` failure mode disappear. The call site and the remote-command template move into one protected file.
+  - Applied in §1.2, §2 F, §3.1, §3.3, §3.6 P5/P8/P9, §3.7, §3.8, §3.11, §7 and §8. ADR A1-1/A1-2.
+- **TD-O-2: ACCEPT raw `gh`** with `--body-file`, `_REPO_SLUG`, and the bound.
+  - The wrappers do not ship to consumers (`framework_consumer_files.txt:20-22` has no `bootstrap/*issue*`). They resolve the slug independently of `HOS_REPO_SLUG`. Every existing `hos-cron` issue path is raw `gh`.
+  - CLAUDE.md's wrapper rule governs sandboxed agent sessions, not the unsandboxed launcher.
+  - Round-1 correction: the draft's standalone `jq` is replaced by `gh --jq` with the title compared in bash (§4.4 step 2). Standalone `jq` is not a `hos-cron` dependency.
+- **TD-O-3: ACCEPT AD-4 (content decides; transport failures fail); FR-11's "non-zero exit" item is overridden.**
+  - FR-11 names the reference parser's condition as its source, and that condition is content-only (`[[ -n "$session_pct" && -n "$weekly_all_pct" ]]`). FR-13 forbids deciding from the exit code.
+  - A non-zero remote exit with both `% used` lines present is real data. Rejecting it would produce a pause mislabelled `unparseable`.
+  - `remote_exit` is still recorded.
+  - Requirements amendment needed: **pm-agent** rewords FR-11's failure list from "non-zero exit" to "transport failure (ssh failure, timeout)". The architect does not edit REQUIREMENTS. This narrows a requirement, so it is also listed for human confirmation (§11 item 12). ADR A1-3.
+- **TD-O-4: ACCEPT** the §3.13 item-3 substitute. AC-25 as worded cannot be observed on the real success shape. **pm-agent** rewords AC-25 to "a primary-path read makes no model call (stub-verified, AC-21) and the key can only run `/usage` when the forced command is adopted". §11 item 13.
+- **TD-O-5: ACCEPT, with one correction.**
+  - The `claude_bin` charset limit binds.
+  - The `staleness_seconds` upper bound is **7200**, not 3600. With `poll_interval_seconds=3600` the draft's bound left no valid staleness value, which would have turned a legal interval into a guaranteed `settings_invalid` pause. Test S1-ST9 is added.
+  - ADR A1-4.
+- **TD-O-6: ACCEPT.** Omit `threshold_percent` when settings are invalid. Add `hos_claude_usage_settings_valid`, always emitted. `pause_condition=1`. This is honest, because no threshold is in force in that state. ADR A1-5.
+- **TD-O-7: ACCEPT.** Structural tests in CI. `promtool` runs as an `integration`-marked test that is skipped when absent. The monitrix `promtool check` output is the recorded evidence. S4 does not touch `.github/workflows/**`. ADR A1-6.
+- **TD-O-8: ACCEPT** exact-title match. It is strictly stricter than a prefix match and closes a real cross-project collision (`hos` vs `hos-dev`).
+- **TD-O-9: ACCEPT.** The close-pending memory, the corrupt-previous-file close sweep, and the check-error flag are additive retries. They cannot unpause anything, and they cost at most one extra paginated query per affected cycle.
+- **TD-O-10: ACCEPT** (one `key=value` per argv element; matches `cycle_log._parse_args`).
+- **TD-O-11: ACCEPT** (`lock_stale_reclaimed` → `diagnostics`, as AD-4 itself says "the read still runs").
+
+**Further round-1 changes, not raised by the TD:**
+- §4.3 G1/G2 and §4.4: use the `set -u`-safe array expansion. Without it, bash 3.2 aborts on a host with no `timeout`.
+- §4.3 G1: `--kill-after=5`.
+- §4.3 G2: the ERE match runs under `local LC_ALL=C`.
+- §1.1: the project-name sanitizer works on bytes.
+- §4.6 item 4: copied-launcher tests also copy the lib.
+- §3.8: `remote-cmd` is the single source for the forced-command text.
+
+**Regex spot-check (architect, independent of TD-VF-11).** The architect extracted §1.9 from this file and got 1091 bytes, 20 LF, sha256 `c8d52b0a…6196683`, a match. It then ran every §3.2 pattern with `re.ASCII`:
+- session 6 / `Oct 3, 2:40am (UTC)`; weekly 48 / `Oct 3, 12am (UTC)`;
+- models `[all models (excluded), Fable 3]`; marker present;
+- 24h: 2049/181, 61/36/34, 4 items, more 0; 7d: 13242/1442, 48/28/10, 8 items, more 2;
+- empty-session: no `% used`, `Total cost:` present, `Usage:\s+0 input` matches;
+- the §4.2 verdict ERE yields 14 groups and accepts a `failopen:read_failed:empty_session` reason.
+
+All results are as the TD states.
+
 ---
 
 ## 10. Escalations
 
 - **ESC-T1 (security-reviewer → human; pre-existing).** TD-VF-9: the sandbox `denyWrite` covers only `__PROJECT_ROOT__/bin`, while `allowWrite` covers all three clones. A sandboxed Overseer or Human session can rewrite `Worker/bin/hos-cron` today, and `Worker/bin/hos-usage-poll` once it exists. Recommendation: add `__HOS_ROOT__/{Human,Worker,Overseer}/bin` to `denyWrite`. This is a `contract/**` change (protected). It does not block #1944. Not filed; I am design-only.
-- **ESC-T2 (orchestrating session).** ESC-4 should also cover `query_issues.sh --list` being single-page (TD-VF-2) and the fifth first-page site at `bin/hos-cron:954`. Not filed.
-- **ESC-T3 (orchestrating session).** TD-VF-1: move this TD and the two upstream docs onto `interactive-1944-proactive-usage-pause-design` (or a fresh branch) before opening the PR. The current checkout is local `main`.
-- **ESC-T4 (orchestrating session, minor).** The existing timeout-breaker `_audit` at `bin/hos-cron:2054` records a single collapsed field (TD-VF-6). Out of scope. Not filed.
+  - *Architect round 1:* recorded as a **finding outside #1944's scope**. It is a pre-existing gap in shipped sandbox policy. #1944 neither widens it nor depends on closing it: the decision-path *data* stays outside every `allowWrite` (AF-1 holds), and the code is CODEOWNERS-gated (AF-2's governance half holds). AF-2's OS-level half is narrower than the ADR stated, and ADR Amendment 1 A1-7 corrects that statement. The fix is a `contract/**` (protected) change and needs security-reviewer review plus human approval. Carried to §11 item 14.
+- **ESC-T2 (orchestrating session).** ESC-4 should also cover `query_issues.sh --list` being single-page (TD-VF-2) and the fifth first-page site at `bin/hos-cron:954`. Not filed. *Architect round 1:* there are more sites than that. `bin/hos-cron:1430` (`per_page=30`), `:1682`, `:1760` and `:1801` (`per_page=20`) also dedup or close from a single page. The follow-up issue must enumerate every `gh api …issues?…per_page=` site in `bin/hos-cron`, not the ADR's list. Making `query_issues.sh --list` paginate changes output for every caller, so it is a **human-owned scoping call** (§11 item 15).
+- **ESC-T3: CLOSED (Architect round 1).** All four docs are on `interactive-1944-proactive-usage-pause-design`.
+- **ESC-T4 (orchestrating session, minor).** The existing timeout-breaker `_audit` at `bin/hos-cron:2054` records a single collapsed field (TD-VF-6). Out of scope. Not filed. *Architect round 1:* this stands. It is cosmetic, because no decision reads that record, but it is a shipped defect in a protected file and goes in the same follow-up as ESC-T2. Human-owned filing (§11 item 16).
 
 ---
 
@@ -1355,6 +1443,14 @@ There is no listening socket: no module or poller code line contains `socket`, `
     - the `/var/lib/hos-usage` + symlink root step on faberix (S3);
     - the rules, `rule_files`, and Grafana provisioning on monitrix (S4).
 
+**Added by architect round 1 (items 1–11 above are unchanged):**
+
+12. **FR-11 narrowed (TD-O-3, ADR A1-3).** A non-zero *remote* exit with both `% used` lines present counts as a SUCCESSFUL read, and `remote_exit` is recorded. Only transport failures (ssh failure or spawn failure, timeout) and content failures are FAILED reads. pm-agent amends the FR-11 text. The human confirms, because this narrows a ruled failure list in the less-pausing direction.
+13. **AC-25 reworded (TD-O-4).** pm-agent rewords it. The real success output has no cost footer, so "reports `$0.0000`" cannot be observed.
+14. **ESC-T1, cross-clone `bin/` write exposure (finding outside #1944's scope).** `denyWrite` covers only each role's own `bin/`, so a sandboxed Overseer or Human session can rewrite `Worker/bin/*`, including `hos-cron` today and `hos-usage-poll` once it ships. Recommended fix: add `__HOS_ROOT__/{Human,Worker,Overseer}/bin` to `denyWrite` in `contract/sandbox-policy.template.json`. That is protected surface and needs security-reviewer review plus human approval. It does not block #1944. The human decides whether and when to file it.
+15. **ESC-T2, widening the AF-3 dedup follow-up.** This covers every single-page `issues?…per_page=` dedup or close site in `bin/hos-cron` (`:954`, `:1430`, `:1682`, `:1760`, `:1801`, `:2063`, `:2167`, `:2191`, plus the commented `:2136`) and `query_issues.sh --list`'s single-page read. Making `--list` complete changes behaviour for every caller, so the human decides the scope. It does not block #1944, which binds its own complete query.
+16. **ESC-T4, collapsed audit call at `bin/hos-cron:2054`.** The timeout-breaker `_audit` passes one space-joined string, so `cycle_log` records a single field. It is cosmetic (no decision reads it). Fix it in the ESC-T2 follow-up or on its own; the human decides. Out of scope for #1944.
+
 ---
 
 ## 12. Startup-gap analysis and affected sign-offs
@@ -1364,6 +1460,7 @@ There is no listening socket: no module or poller code line contains `socket`, `
 - **TD-VF-9** is a gap in *shipped* sandbox policy, not in #1944. The sign-offs on `contract/sandbox-policy.template.json` (#1183/#1185 era) stand for what they reviewed, which was each clone's own `bin/`. The cross-clone case is new information routed via ESC-T1. It does not invalidate them, because they never claimed cross-clone coverage.
 - **TD-VF-6** affects shipped code (`:2054`). That code's sign-off stands, because the defect is cosmetic: the audit record is never read by a decision. Routed as ESC-T4.
 - The #1450 breaker's sign-offs stand untouched (FR-40, S2-ST3).
+- *Architect round 1:* ADR Amendment 1 (A1-1 to A1-7) revises AD-4, AD-5, AD-6, AD-9, AD-10, AD-12 and the AF-2 statement. These are the reactive revisions the startup-gap test covers, so the question is asked again. Each revision corrects a premise *before any code exists*: no design other than this TD, and no code, was approved against the superseded text. **Affected sign-offs: none orphaned.** The only artifact built against the superseded ADR is this TD, and round 1 updates it in place. No `startup-artifact-gap` issue is warranted, because the initial review is still in progress.
 
 ---
 
