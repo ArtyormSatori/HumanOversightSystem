@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import time
@@ -243,6 +244,12 @@ def flag(argv: list[str], name: str) -> str:
     return argv[argv.index(name) + 1]
 
 
+def eq_flag(argv: list[str], name: str) -> list[str]:
+    """Values of `--name=<value>` tokens (the hardened `=` form, CWE-88)."""
+    prefix = f"{name}="
+    return [a[len(prefix) :] for a in argv if a.startswith(prefix)]
+
+
 EXPECTED_KEYS = set(
     """event schema_version timestamp run_id mode runner_outcome error_code error_detail binding
     entry agent posture registry_digest prompt_template_version base_sha head_sha
@@ -302,7 +309,8 @@ def test_T6_02_argv_shape(repo, monkeypatch, capsys):
     assert flag(argv, "--head-sha") == _git(repo, "rev-parse", "HEAD")
     assert flag(argv, "--prompt-template-version").startswith("sha256:")
     assert "--input-file" in argv
-    assert [argv[i + 1] for i, a in enumerate(argv) if a == "--matched-file"] == ["src/a.py"]
+    assert eq_flag(argv, "--matched-file") == ["src/a.py"]
+    assert "--matched-file" not in argv
     assert argv.count("--require-env-auth") == 1
     assert "shell=True" not in Path(sweep.__file__).read_text()
 
@@ -405,8 +413,8 @@ def test_T6_06_not_applicable(tmp_path, monkeypatch, capsys):
     rc, _, _ = measure(root, capsys)
     assert rc == 0
     argv = seam.calls[0]
-    assert "--not-applicable" in argv and "--input-file" not in argv
-    assert "matched no changed file" in flag(argv, "--not-applicable")
+    assert "--not-applicable" not in argv and "--input-file" not in argv
+    assert "matched no changed file" in eq_flag(argv, "--not-applicable")[0]
     assert result_of(root)["runner_outcome"] == "not_applicable"
     assert not _records(root, sweep.EVENT_START)
 
@@ -585,7 +593,7 @@ def test_T6_14_git_error_and_nul_separated_paths(repo, monkeypatch, capsys):
     _commit(repo, "non-ascii")
     rc, out, _ = measure(repo, capsys)
     assert rc == 0, out
-    matched = [seam.calls[0][i + 1] for i, a in enumerate(seam.calls[0]) if a == "--matched-file"]
+    matched = eq_flag(seam.calls[0], "--matched-file")
     assert matched == ["src/a.py", "src/é.py"]
 
 
@@ -608,7 +616,7 @@ def test_T6_14_rename_is_matched_under_its_new_name(repo, monkeypatch, capsys):
     seam = install(monkeypatch, Seam())
     rc, out, _ = measure(repo, capsys, base="mid")
     assert rc == 0, out
-    matched = [seam.calls[0][i + 1] for i, a in enumerate(seam.calls[0]) if a == "--matched-file"]
+    matched = eq_flag(seam.calls[0], "--matched-file")
     assert matched == ["src/new.py"]
     assert result_of(repo)["matched_lines_changed"] == 2
 
@@ -843,6 +851,89 @@ def test_T6_20f_unreadable_audit_tree_blocks_launch(repo, monkeypatch, capsys):
     assert rc == 1 and not seam.calls
     assert result["runner_outcome"] == "audit_unwritable"
     assert result["error_code"] == "audit_tree_unreadable"
+
+
+def test_T6_20g_actionable_failure_echo(repo, monkeypatch, capsys):
+    install(monkeypatch, Seam())
+    bad = repo / "audit" / "log" / "2026" / "10" / "bad-record.json"
+    bad.parent.mkdir(parents=True)
+    bad.write_text("{")
+    rc, out, err = measure(repo, capsys)
+    result = json.loads(out)
+    assert rc == 1
+    assert result["error_detail"].endswith("— repair or move that file and re-run")
+    assert "bad-record.json" in result["error_detail"]
+    echo = [ln for ln in err.splitlines() if ln.startswith("dimension_sweep: audit_unwritable:")]
+    assert echo == [
+        f"dimension_sweep: audit_unwritable: audit_tree_unreadable: {result['error_detail']}"
+    ]
+
+
+def test_T6_20h_sigterm_mid_seam_is_an_interrupt(repo, monkeypatch, capsys):
+    before = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGHUP)}
+
+    def seam(argv, *, timeout_s):
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise AssertionError("SIGTERM should have interrupted the seam")
+
+    monkeypatch.setattr(sweep, "_run_primitive", seam)
+    with pytest.raises(KeyboardInterrupt):
+        sweep.main(["measure", "--base", BASE], repo_root=repo)
+    capsys.readouterr()
+    result = result_of(repo)
+    assert result["runner_outcome"] == "interrupted"
+    assert result["error_code"] == "KeyboardInterrupt"
+    assert {sig: signal.getsignal(sig) for sig in before} == before
+
+
+def test_T6_20i_sighup_mid_seam_is_an_interrupt(repo, monkeypatch, capsys):
+    def seam(argv, *, timeout_s):
+        os.kill(os.getpid(), signal.SIGHUP)
+        raise AssertionError("SIGHUP should have interrupted the seam")
+
+    monkeypatch.setattr(sweep, "_run_primitive", seam)
+    with pytest.raises(KeyboardInterrupt):
+        sweep.main(["measure", "--base", BASE], repo_root=repo)
+    capsys.readouterr()
+    assert result_of(repo)["runner_outcome"] == "interrupted"
+
+
+def test_T6_22b_document_out_refuses_existing_file(repo, monkeypatch, capsys, tmp_path):
+    install(monkeypatch, Seam())
+    target = tmp_path / "existing.json"
+    target.write_text("precious")
+    rc, _, err = measure(repo, capsys, "--document-out", str(target))
+    assert rc == 0 and target.read_text() == "precious"
+    assert "--document-out not written" in err
+
+
+def test_T6_22c_document_out_refuses_symlink_target(repo, monkeypatch, capsys, tmp_path):
+    install(monkeypatch, Seam())
+    victim = tmp_path / "victim.txt"
+    victim.write_text("victim")
+    link = tmp_path / "link.json"
+    link.symlink_to(victim)
+    rc, _, err = measure(repo, capsys, "--document-out", str(link))
+    assert rc == 0 and victim.read_text() == "victim" and link.is_symlink()
+    assert "--document-out not written" in err
+    dangling = tmp_path / "dangling.json"
+    dangling.symlink_to(tmp_path / "does-not-exist")
+    shutil.rmtree(repo / "audit")
+    measure(repo, capsys, "--document-out", str(dangling))
+    assert not (tmp_path / "does-not-exist").exists()
+
+
+def test_T6_22d_document_out_is_created_private(repo, monkeypatch, capsys, tmp_path):
+    install(monkeypatch, Seam())
+    target = tmp_path / "fresh.json"
+    assert measure(repo, capsys, "--document-out", str(target))[0] == 0
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_T6_22e_document_out_confinement_rechecked_at_write(repo, tmp_path):
+    with pytest.raises(OSError, match="inside the repository"):
+        sweep._write_document(repo / "x.json", b"{}", repo.resolve())
+    assert not (repo / "x.json").exists()
 
 
 def test_T6_21_unwritable_result_record(repo, monkeypatch, capsys):

@@ -31,6 +31,14 @@ the oversight venv's interpreter by absolute path (a fresh worktree has no
     <human-clone>/scripts/oversight/.venv/bin/python \\
         scripts/automation/dimension_sweep_cli.py report
 
+CAVEATS. (1) Measure only heads that are already reviewed or merged: the runner,
+bootstrap/invoke_agent.sh, the agent file and the posture all execute from the
+checked-out head, with the operator's credentials. (2) On Ctrl-C or a runner
+timeout the runner kills the wrapper's process group, but the primitive's own
+`claude` child runs in its own session and may survive. After an interrupted run,
+check `pgrep -f "claude --agent"` and stop any leftover. This is a known W1 gap,
+tracked separately.
+
 Pilot with 3 launched runs first and stop if `report` shows
 terminal_reason_missing_count > 0, two of three runs without
 payload_extractable, or input_digest_mismatch_count > 0. Then (1) commit
@@ -52,6 +60,7 @@ agent output, finding text or file content).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import importlib.util
@@ -224,6 +233,17 @@ def _check_document_out(path: str | None, root: Path) -> None:
         raise _UsageError(f"--document-out must resolve outside the repository work tree: {path}")
 
 
+def _write_document(path: Path, data: bytes, root: Path) -> None:
+    """Create-only, no-follow write of the full W1 document (CWE-367/59). The confinement
+    check is re-run on the resolved parent immediately before the write."""
+    parent = path.parent.resolve()
+    if parent == root or root in parent.parents:
+        raise OSError("--document-out now resolves inside the repository work tree")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    with os.fdopen(os.open(path, flags, 0o600), "wb") as fh:
+        fh.write(data)
+
+
 def _run_git(root: Path, *args: str) -> bytes:
     try:
         proc = subprocess.run(
@@ -295,6 +315,27 @@ def _runner_timeout_s(binding_timeout: int) -> int:
     if _RUNNER_TIMEOUT_OVERRIDE_S is not None:
         return _RUNNER_TIMEOUT_OVERRIDE_S
     return binding_timeout + aic.DEFAULT_GRACE_S + _RUNNER_EXTRA_S
+
+
+def _raise_interrupt(signum: int, _frame: object) -> NoReturn:
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
+@contextlib.contextmanager
+def _signals_as_interrupt():
+    """SIGTERM/SIGHUP become KeyboardInterrupt while the primitive runs, so the group kill and
+    the best-effort `interrupted` record run. Previous handlers are restored on exit."""
+    previous: dict[int, object] = {}
+    try:
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            previous[sig] = signal.signal(sig, _raise_interrupt)
+    except ValueError:  # not the main thread: handlers cannot be installed
+        pass
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)  # type: ignore[arg-type]
 
 
 def _run_primitive(argv: list[str], *, timeout_s: int) -> tuple[int, bytes, bytes]:
@@ -547,7 +588,8 @@ def _find_prior(root: Path, digest: str) -> str | None:
                 return audit.record_relpath(record, ts)
     except (OSError, ValueError, KeyError) as exc:
         # Fail closed: launching would spend quota on a state the reuse check could not verify.
-        raise _Fail("audit_unwritable", "audit_tree_unreadable", f"reuse check: {exc}") from None
+        detail = f"reuse check: {_one_line(str(exc))[:300]} — repair or move that file and re-run"
+        raise _Fail("audit_unwritable", "audit_tree_unreadable", detail) from None
     return None
 
 
@@ -569,7 +611,7 @@ def _base_primitive_args(binding: dr.Binding, rec: dict, matched: list[str]) -> 
         rec["prompt_template_version"],
     ]
     for path in matched:
-        argv += ["--matched-file", path]
+        argv.append(f"--matched-file={path}")
     return argv
 
 
@@ -586,6 +628,9 @@ def _cmd_measure(args: argparse.Namespace, root: Path) -> int:
             runner_outcome=fail.outcome,
             error_code=fail.code,
             error_detail=_bounded_detail(fail.detail),
+        )
+        sys.stderr.write(
+            f"dimension_sweep: {fail.outcome}: {fail.code or '-'}: {rec['error_detail']}\n"
         )
         exit_code = 1
     finally:
@@ -644,7 +689,7 @@ def _measure(args: argparse.Namespace, root: Path, rec: dict, lock: _Lock) -> No
     common = _base_primitive_args(binding, rec, matched)
     if rendered is None:
         argv = prefix + ["--posture", binding.posture] + common
-        argv += ["--not-applicable", item.reason]
+        argv.append(f"--not-applicable={item.reason}")
         _launch(args, root, rec, argv, binding, None, is_launch=False)
         rec["runner_outcome"] = "not_applicable"
         return
@@ -698,7 +743,7 @@ def _launch(
             raise _Fail("audit_unwritable", "start_record_unwritable", str(exc)) from None
     began = time.monotonic()
     try:
-        _observe(args, rec, argv, binding, digest, began)
+        _observe(args, root, rec, argv, binding, digest, began)
     except _Fail:
         raise
     except BaseException as exc:
@@ -719,6 +764,7 @@ def _launch(
 
 def _observe(
     args: argparse.Namespace,
+    root: Path,
     rec: dict,
     argv: list[str],
     binding: dr.Binding,
@@ -727,7 +773,10 @@ def _observe(
 ) -> None:
     """Seam call and document ingestion. Raises _Fail on any no-document path."""
     try:
-        rc, out, err = _run_primitive(argv, timeout_s=_runner_timeout_s(binding.timeout_seconds))
+        with _signals_as_interrupt():
+            rc, out, err = _run_primitive(
+                argv, timeout_s=_runner_timeout_s(binding.timeout_seconds)
+            )
     except _PrimitiveTimeout:
         rec["runner_wall_ms"] = int((time.monotonic() - began) * 1000)
         raise _Fail(
@@ -749,7 +798,7 @@ def _observe(
         rec["input_digest_match"] = digest == _as_dict(doc.get("input")).get("input_digest")
     if args.document_out:
         try:
-            Path(args.document_out).write_bytes(out)
+            _write_document(Path(args.document_out), out, root)
         except OSError as exc:
             sys.stderr.write(f"dimension_sweep: --document-out not written: {exc}\n")
 
