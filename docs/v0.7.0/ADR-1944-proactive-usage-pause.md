@@ -31,6 +31,8 @@ Line numbers refer to the working tree on `interactive-1944-proactive-usage-paus
 
 **AF-4 (HIGH): `bin/hos-cron` ships to every consumer, so a fail-closed check would stop every consumer on upgrade.** `framework_consumer_files.txt` ships `bin/hos-cron`, and `hos_install.sh:1904-1916` copies it. A consumer host that upgrades without a poller has no status file. Under the ruled fail-closed default, every worker and overseer cycle on that host then pauses. That is correct by the ruling, and it is loud (AD-8 files an issue naming `poller_not_installed`). It is also a deployment-topology and operational-burden change for every consumer, which puts it under the product-boundary checkpoint (ESC-1). It does **not** change what ships on this host.
 
+> Superseded in part by Amendment 2 A2-15: no issue is filed; the hos-cron log line names the reason (D7, D10).
+
 **AF-5 (LOW): T4.1's regex cannot see a variable-path invocation.** `bin/hos-cron:899` and `:1849` run `"$CLAUDE_BIN" --print`, and T4.1 does not match either. A `/usage` call written as `"$claude_bin" -p /usage` would also pass T4.1 silently. AD-5 does not lean on that blind spot. It records the exemption explicitly.
 
 **AF-6 (from the D-1 sample): the requirements' "subagent-breakdown %" is not a breakdown.** The real section says: *"Behaviors are independent characteristics, not a breakdown."* The three behavior lines (subagent-heavy, >150k context, 8+ hours) overlap. Summing or stacking them would invent a number. Only the "Top subagents" list is attribution, and it is **truncated** (`+2 more`). AD-4, AD-10 and AD-11 carry this through.
@@ -42,6 +44,8 @@ Line numbers refer to the working tree on `interactive-1944-proactive-usage-paus
 - **monitrix:** Prometheus job `linux_servers` (`scrape_interval: 15s`) already targets `192.168.1.12:9100` with labels `instance="faberix", role=server, os=ubuntu`. `rule_files` is commented out. Alertmanager is configured at `localhost:9093`. Grafana is 13.2.3, and its provisioning directories hold only `sample.yaml` (dashboards are managed in the UI today).
 
 ### 0.4 Verification gaps
+
+> Extended by Amendment 2 A2-21 (new verification gaps).
 
 - Whether node_exporter 1.10.2's textfile collector follows a **symlink** in its directory. AD-10 depends on this, and the TD must verify it on faberix before S3 is coded (AD-10 gives a fallback).
 - Which Alertmanager receivers exist on monitrix. AD-11's alerts route wherever the existing config sends them.
@@ -64,11 +68,15 @@ The design draws one line, and the August failure is what drew it. **The pause d
 
 ### AD-1: The proactive check is the core deliverable. It ships enabled, with no off switch. (BINDING; FR-1, FR-26, FR-50.)
 
+> Superseded in part by Amendment 2 A2-1: the definition of done is now AC-44 (a real pause alert received by email), not "S1 and S2 merged". The no-off-switch rule stands.
+
 - There is no `enabled=` setting, no env var, and no flag that bypasses the cycle-start check. The ruled operator lever is `fail_mode=open` (FR-21). Even in that mode, every failure is still recorded and surfaced (AD-8).
 - The work is done only when **S1 and S2 are both merged** (AD-12). S3/S4 (dashboards) without S2 do not satisfy #1944.
 - **If any blocker prevents a real `/usage` read in production** (for example, a CLI change that breaks the loopback read), the build **stops and escalates `needs-human`, naming the blocker** (FR-1). It does not ship a reactive or partial substitute. The #1450 block at `bin/hos-cron:2090-2155` and its live auto-close half at `:2181-2202` are not touched (FR-40, AC-17).
 
 ### AD-2: Component placement. Every file on the decision path lives under `bin/` (protected surface, sandbox `denyWrite`). (BINDING; AF-2, FR-49, FR-50.)
+
+> Amended by Amendment 2 A2-9 (the call site becomes a forced-command template) and A2-16 (install path defined in one place; no clone assumption).
 
 | Component | Path | Role |
 |---|---|---|
@@ -83,6 +91,8 @@ The design draws one line, and the August failure is what drew it. **The pause d
 *Rejected:* `scripts/automation/lib/` (not protected, so the worker could edit its own brake, AF-2). `bootstrap/` (protected, but it is the machine-setup bundle and is not copied wholesale by the installer. The poller is a cron entry point, and those live in `bin/` next to `hos-cron`/`hos-trim-logs`).
 
 ### AD-3: Status files. One machine-level **reading file** written by the poller, plus one fixed-path **per-role/project status file** written by each cycle check. Both are overwritten in full and never grow. (BINDING; FR-31-FR-36, FR-27, Q5, AF-1.)
+
+> Superseded by Amendment 2 A2-2 and A2-3: exactly one reading file (`~/.hos/usage-pause/reading`); no per-role/project status file (D6).
 
 **Reconciling Q5.** The 08-17 ruling's "one fixed-path status file per project/role" was written when the read was assumed to run inside each role's cycle. With one poller (FR-50) and a machine-wide quota (FR-27), the *reading* is a single fact. Writing N copies of it would add a failure mode (copies disagree after a partial run) and would couple the poller to `projects.conf`. The design keeps both rulings literally:
 
@@ -112,6 +122,8 @@ The intent ("fixed path, overwritten, never grows, consumers read only the curre
 **Location** is outside every sandboxed role's `allowWrite` and `allowRead` (AF-1). The TD adds a static test asserting that neither `~/.hos` nor `~/.config/hos/usage-pause.conf` appears in `contract/sandbox-policy.template.json` `allowWrite`.
 
 ### AD-4: Parser and read classification, pinned to the D-1 sample. No model fallback ships in v1. (BINDING; FR-10-FR-17, FR-9, FR-14, FR-15, D-1, D-2, Q18.)
+
+> Amended by Amendment 2 A2-6 (per-model weekly is a pause trigger, D1) and A2-7 (`--output-format json`, parse `result`, revised failure enum, D13).
 
 **Success criterion (FR-11, FR-13).** A read is SUCCESSFUL **only if** it yields an integer `session_pct` from the `Current session: N% used` line **and** an integer `weekly_all_pct` from the `Current week (all models): N% used` line. These are the reference regexes, last match wins, as in `tail -1`. Nothing else decides success: not the exit code, not stderr, not the line-1 subscription marker.
 
@@ -147,6 +159,8 @@ Every breakdown field is parsed **independently**. A miss, a format change, or a
 
 ### AD-5: The `/usage` call site is an on-the-record exemption from ADR-1643 AD-16. It is not routed through `invoke_agent.sh`. (BINDING; Q8, VF-6, AF-5, FR-9.)
 
+> Superseded by Amendment 2 A2-9: the `claude` invocation lives only in the `authorized_keys` forced command (D5); no `env -u` (D5).
+
 `/usage` invokes no model, has no agent, has no verdict, and must run under a credential `invoke_agent.sh` must never use (the personal login, reached by SSH). `invoke_agent.sh` exists to give *agent* invocations a deterministic envelope (ADR-1643 AD-16: "nothing else invokes `claude --agent` directly"). Routing a non-agent, non-model read through it would either fail its preconditions (no agent file) or force a bare-model escape hatch into the primitive, which AD-16 forbids. This mirrors the `setup_clis.sh` exemption: the call must not depend on the thing it is not.
 
 How the exemption is recorded, so it cannot be silently widened:
@@ -158,6 +172,8 @@ How the exemption is recorded, so it cannot be silently widened:
 *Rejected:* routing through `invoke_agent.sh` (reasons above). A blanket "non-model calls are exempt" rule (unbounded, and it invites the next site to self-classify).
 
 ### AD-6: The SSH read: options, time bound, credential hygiene, and the forced-command recommendation. (BINDING except the `authorized_keys` options, which are a §5 recommendation; FR-3-FR-7, FR-47, FR-48, Q2, Q9, Q12, Q14.)
+
+> Superseded in part by Amendment 2 A2-9 (forced command exactly `from=` + `command=`, no `restrict`, no env unsetting, client sends no remote command) and A2-16 (crontab line is the single install-path definition).
 
 **Invocation** (from `bin/hos-usage-poll`, no shell `eval`, argv array):
 
@@ -221,6 +237,8 @@ A failure in production is still just a FAILED read, so the fail mode applies an
 
 ### AD-7: The cycle-start check in `bin/hos-cron`. It is a stateless gate re-evaluated every cycle. It never writes, reads-to-clear, or removes a `hos-suspend` marker. (BINDING; FR-19, FR-21, FR-23-FR-26, FR-28, FR-36, Q16, AS-2.)
 
+> Amended by Amendment 2 A2-3 (hos-cron is the decider), A2-4 (global, stateless; earlier placement), A2-5 (no GitHub calls; per-paused-cycle audit event), A2-6 (three thresholds).
+
 **Pause = this cycle exits 0 before any Claude session starts.** There is no pause marker. Every cycle re-derives the decision from the reading file, the settings, and the clock. Therefore:
 - **Auto-resume (FR-23, AC-10)** is structural. The first cycle that sees a fresh successful reading with both windows `<` threshold runs. Nothing needs clearing.
 - **FR-25 / AC-11 hold by construction.** The existing `hos-suspend` check (`:258-286`) still runs first, before the lock. A human or timeout-breaker marker still stops the cycle before this gate is reached, and this mechanism contains no code path that writes, edits, or deletes anything under `~/.hos/suspend/`. A static test asserts that the new block and `usage_pause.py` never reference `suspend/` or invoke `hos-suspend`.
@@ -257,6 +275,8 @@ A failure in production is still just a FAILED read, so the fail mode applies an
 
 ### AD-8: Visibility. One audit event per transition, and one deduped `needs-human` issue per **project repo** per episode, auto-closed on resume. The query is complete, and both dedup and filing fail closed. (BINDING; FR-34, FR-37-FR-39, FR-22, AS-3, Q15, Q17, AF-3.)
 
+> **Removed** by Amendment 2 A2-5: no issue filing, dedup, auto-close, or transition memory of any kind (D7). Audit is one event per paused cycle.
+
 **Transitions** are detected by comparing the new decision with the previous per-role/project status file (AD-3.2). If the previous file is unreadable, it counts as "run", so a fresh pause still files (dedup protects against repeats).
 
 **Audit (Q17: yes, transitions only).** `_audit cycle-usage-pause "role=… reason=… session_pct=… weekly_pct=… reading_age=…"` on run→pause, and `_audit cycle-usage-resume "role=… paused_since=…"` on pause→run. There are no per-poll events and the poller emits no audit (FR-34, AC-13). **No decision reads an audit event** (the ADR-1604 AD-4 rule, for the same reason as its AF-2 lost-write finding).
@@ -280,6 +300,8 @@ A failure in production is still just a FAILED read, so the fail mode applies an
 (b) closes a hole AS-3 does not name. With fail-open plus a **dead poller**, there are no "failed polls" to count, the check is silently absent, and credits billing runs unwatched. That is exactly the #1362/#1369 class this feature exists to prevent. The issue auto-closes on the first fresh success. A degraded state also emits one `cycle-usage-degraded` audit event on entry.
 
 ### AD-9: Settings: `$HOME/.config/hos/usage-pause.conf`, key=value, **parsed, never sourced**. Missing file means the ruled defaults. Any invalid value means pause, loudly. (BINDING; recommendation on Q11 pending, §5; FR-8, FR-18, FR-21, FR-27, FR-29, FR-30, FR-36, AC-23.)
+
+> Superseded in part by Amendment 2 A2-10 (new keys, removed `failopen_issue_after`, no issue on invalid settings).
 
 **Location (Q3).** `$HOME/.config/hos/usage-pause.conf`, the machine-level directory `hos-cron` already reads (`projects.conf`, `claude-auth.env`). It is resolved from **literal `$HOME`**, never `HOS_CONFIG_DIR` (VF-4 trap). One file per host user means every project's worker and overseer, and the poller, read the same values (FR-27).
 
@@ -310,6 +332,8 @@ Thresholds above 100 are invalid, not "effectively off". A typo must never becom
 - **The poller keeps polling under invalid settings,** using defaults for its own `read_timeout_seconds`/`claude_bin` and recording `settings_status=invalid:<key>`. The reading stays fresh, so fixing the file resumes work at the next cycle.
 
 ### AD-10: Prometheus export on faberix: a best-effort side path through a scott-owned file, symlinked into the root-owned textfile directory. It can never affect the pause. (BINDING; FR-41-FR-45, Q4, D-3.)
+
+> Amended by Amendment 2 A2-11 (write order, history, last-raw) and A2-12 (metrics contract).
 
 **Isolation (binding).** The poller writes the reading file **first**. Only then does it render and write the `.prom`, inside an error-swallowing step whose failure is logged to `poll.last.log` and nothing else. **No code on the decision path reads the `.prom`, node_exporter, or Prometheus.** A test makes the `.prom` path unwritable and asserts that the reading file and the decision are byte-identical to the writable case.
 
@@ -362,6 +386,8 @@ Binding notes:
 
 ### AD-11: monitrix configuration: scrape unchanged, a small alert-rules file, a file-provisioned dashboard. All human-applied. Artifacts live in `contrib/monitoring/` and are never shipped to consumers. (BINDING; FR-41, FR-46, AC-20; human scope addition 2026-10-02.)
 
+> Superseded in part by Amendment 2 A2-13 (Grafana alerting replaces the Prometheus rules file and Alertmanager routing) and A2-14 (monitrix sparse clone + sync job).
+
 **(1) Prometheus scrape config: no change (a decision, not an omission).** Job `linux_servers` already scrapes `192.168.1.12:9100` every 15s with `instance="faberix"`. Textfile-collector metrics come out of the same `/metrics` endpoint, so `hos_claude_usage_*` series arrive with the existing labels automatically. A 15s scrape of a file that changes every 5 minutes adds no information loss. A separate job would duplicate the target and add a second `up` series to reason about.
 
 **(2) Prometheus alert rules: ship `contrib/monitoring/prometheus/hos-claude-usage.rules.yml` (recommended).** The pause itself needs none of this. These alerts exist because the *dashboard's* failure modes are otherwise invisible, especially the ESM purge recurring on a release upgrade (§0.3).
@@ -407,6 +433,8 @@ Alerts route through the existing Alertmanager at `localhost:9093`. Which receiv
 The README also states: **"A release upgrade can purge the ESM `prometheus-node-exporter` build (it did on 2026-10-01). `HosClaudeUsageMetricsAbsent` and the absence of `hos_*` series on monitrix are how you notice. Reinstall, then re-run `bin/hos-usage-poll --check`."** The `--check` symlink/writability line (AD-6 item 7) also catches it from faberix.
 
 ### AD-12: Build slicing and risk tiers. (BINDING.)
+
+> Superseded by Amendment 2 A2-18.
 
 | Slice | Contents | Tier | Merge |
 |---|---|---|---|
@@ -491,6 +519,9 @@ The README also states: **"A release upgrade can purge the ESM `prometheus-node-
 - Scrape config unchanged.
 
 ### ESC-1: Consumers get the fail-closed gate on upgrade (product boundary: pm-agent + human). AF-4.
+
+> Resolved by Amendment 2 A2-15: option (a) (D10).
+
 `bin/hos-cron` ships to consumers. After upgrading, a consumer host with no poller pauses every cycle (`poller_not_installed`, with an issue) until it does the §2a setup or sets `fail_mode=open`. Consumers on API-key billing have no subscription `/usage` at all, and for them only `fail_mode=open` plus a permanent `[DEGRADED]` issue is available. **This ADR does not add an off switch (FR-1).** The human decides between:
 - (a) ship as designed, with a release note and an upgrade-checklist step; or
 - (b) a consumer-only escape hatch.
@@ -498,6 +529,9 @@ The README also states: **"A release upgrade can purge the ESM `prometheus-node-
 (b) would need a new human ruling, because it is the "flag" FR-1 forbids, applied to installs other than this host. **This does not block S1/S2 on faberix.** It must be decided before the next release that ships S2 to consumers.
 
 ### ESC-2: monitrix and faberix root steps are human actions.
+
+> Amended by Amendment 2 A2-14 and A2-20 (the monitrix step list changes; still human actions).
+
 - faberix: the `/var/lib/hos-usage` + symlink step.
 - monitrix: rules + `rule_files`, Grafana provider + JSON.
 
@@ -505,12 +539,19 @@ Sessions are denied `sudo` and do not reach monitrix. These are documented, not 
 
 ### ESC-3: The fail-open dead-poller case (AD-8 (b)) is DERIVED. Confirm, §5.
 
+> Removed by Amendment 2 A2-19 (D3, D7).
+
 ### ESC-4: AF-3 (the existing breakers' first-page dedup) needs its own issue.
+
+> Resolved by Amendment 2 A2-19: filed as #1946.
+
 I am design-only this session and have not filed it. The orchestrating session should file it. #1944 does not depend on the fix, because AD-8 binds its own complete query.
 
 ---
 
 ## 5. Human confirmation required
+
+> Superseded by Amendment 2 A2-20, which carries the current list.
 
 1. **AS-1:** only session and all-models weekly trigger a pause. Per-model weekly values are gauges only.
 2. **AS-2:** gate at cycle start only. A running cycle finishes, bounded by `HOS_CRON_MAX_SECONDS`. No mid-cycle kill.
@@ -551,6 +592,7 @@ Nothing for #1944 has been designed or built before this ADR, so **no prior sign
 These revisions come out of reviewing `TECHNICAL-DESIGN-1944-proactive-usage-pause.md`, DRAFT-1 (§9.1 there). They are appended; the text above is not rewritten. Where they conflict, this amendment governs. Startup-gap check: every item corrects a premise before any code exists, and the only artifact built against the superseded text is the TD, which was updated in the same round. **No sign-off is orphaned.**
 
 - **A1-1 (AD-5, call site).** The sole `/usage` call site is **`bin/lib/usage_pause.py`**, not `bin/hos-usage-poll`.
+  > Superseded in part by Amendment 2 A2-9: the template is now the forced-command text only.
   - It holds the remote command as one constant, `REMOTE_CMD_TEMPLATE`, and that constant is also the source of the `--check`/`--print-setup` forced-command text.
   - The T4.1 exemption is `bin/lib/usage_pause.py`, matched deterministically through its docstring.
   - T4.1b pins the template line and the sole call site.
@@ -567,7 +609,9 @@ These revisions come out of reviewing `TECHNICAL-DESIGN-1944-proactive-usage-pau
   - pm-agent also rewords AC-25, which cannot be observed on the real success shape (TD §3.13 item 3 is the substitute).
 - **A1-4 (AD-9, bounds).** `staleness_seconds` must be `> poll_interval_seconds + read_timeout_seconds` **and `≤ 7200`**. The upper bound stops a typo from becoming a near-disable, and 7200 keeps the range non-empty at the maximum interval. `claude_bin` must match `^/[A-Za-z0-9._+/-]{1,254}$` with no `/./` or `/../` segment, because it is interpolated into a remote command and an `authorized_keys` line.
 - **A1-5 (AD-10, metrics).** `hos_claude_usage_threshold_percent` is emitted **only when settings are valid**. A new always-present gauge, `hos_claude_usage_settings_valid` (1/0), is added. Under invalid settings, `pause_condition` is 1.
+  > Amended by Amendment 2 A2-12 (`limit` label, three thresholds).
 - **A1-6 (AD-12, S4).** "A `promtool` lint test in CI" becomes: structural YAML/JSON and metric-name tests in CI, plus an `integration`-marked `promtool check rules` test that is skipped when `promtool` is absent. The human's `promtool check` output on monitrix is the recorded evidence. S4 does not touch `.github/workflows/**`.
+  > Amended by Amendment 2 A2-18 (S4 now holds Grafana alerting files, not Prometheus rules).
 - **A1-7 (AF-2, statement correction).** The OS-level half of AF-2 is narrower than stated. `denyWrite` covers only each role's **own** clone's `bin/`, while `allowWrite` covers all three clones, so a sandboxed Overseer or Human session can write `Worker/bin/*`. AF-2's governance half (CODEOWNERS → HUMAN_REQUIRED) and AF-1 (decision *data* outside every `allowWrite`) are unaffected.
   - This is a **pre-existing gap outside #1944's scope** (TD ESC-T1). #1944 neither widens it nor depends on closing it.
   - The fix (adding the three clones' `bin/` to `denyWrite`) is protected `contract/**` surface and needs security-reviewer review plus human approval.
@@ -587,3 +631,344 @@ These revisions come out of reviewing `TECHNICAL-DESIGN-1944-proactive-usage-pau
 - 16: the collapsed `_audit` call at `bin/hos-cron:2054`.
 
 Items 1–11 of §5 are unchanged and unresolved.
+
+---
+
+## Amendment 2 (2026-10-03, human rulings D1-D19)
+
+**Source.** Human rulings, interactive session 2026-10-03, D1–D19 (cited "D<n>"), as transcribed by pm-agent into `REQUIREMENTS-1944-proactive-usage-pause.md` Amendment 3, plus the second real capture (`usage-sample-2-json.txt`, faberix, `--output-format json`, jq-filtered to `{result, total_cost_usd, usage}`). The rulings are authoritative. Where this amendment conflicts with the text above or with Amendment 1, **this amendment governs**. Each superseded AD carries an inline pointer. Earlier text is not rewritten.
+
+**Startup-gap check.** Every item here is a human ruling or follows from one, and each lands before any code exists. The only artifacts built against the superseded text are this ADR and `TECHNICAL-DESIGN-1944-proactive-usage-pause.md` (DRAFT, not approved). Affected sign-offs: §A2-22.
+
+### A2-1: Core deliverable and definition of done (supersedes AD-1's "done when S1 and S2 merged"; D7, D17, AC-44)
+
+- AD-1 stands as written in these respects: the proactive check ships enabled, there is no off switch, and a blocker that prevents a real read stops the build and escalates.
+- **#1944 is done only when a real pause alert reaches the human by email.** That means a recorded end-to-end run in which a real reading produces `hos_claude_usage_pause_condition = 1` on faberix, the Grafana alert fires, and the email arrives through the HOS contact point (AC-44). Merged code does not satisfy #1944 until that run is recorded. Neither do a test alert (AC-43) or a stubbed alert.
+- **S2 may merge, and run on faberix, before alerting is live.** Under the default `fail_mode=closed`, a pause nobody is alerted to is safe: autonomous work stops and no credits are spent. The cost is lost throughput, not lost money. **`fail_mode=open` must not be set on faberix until A2-18's S5 is recorded.** Fail-open is safe only once alerting is live (D3, FR-67), and the runbook says so.
+- Procedure for the AC-44 run (TD to finalize; the human performs it): set `session_threshold` to a value at or below the current session % in `usage-pause.conf`, wait for one poll, confirm the email arrives, then restore the setting. This is a real pause from real data. Every autonomous cycle on the host skips while the threshold is lowered, which is intended.
+
+### A2-2: Exactly one reading file (supersedes AD-3's per-role/project status file; D6)
+
+- There is one file, **`${HOS_STATE_DIR:-$HOME/.hos}/usage-pause/reading`** (renamed from `reading.status`). Only the poller writes it. Every poll overwrites it in full, failures and crashes included.
+- **`hos-cron` only reads it. It writes nothing under `~/.hos/usage-pause/`.** No per-role or per-project status file exists. A static test asserts that the `hos-cron` gate block and `usage_pause.py check` contain no write to that directory.
+- The following parts of AD-3 stand:
+  - format: `key=value`, `schema=1` first, `end=1` sentinel last, sanitized single-line values;
+  - atomic write: fixed `.tmp` sibling, then `rename(2)`;
+  - an `ERR`/`EXIT`-equivalent crash path still writes `outcome=crashed`;
+  - absent values are omitted, never written as 0;
+  - the location stays outside every sandboxed role's `allowWrite`/`allowRead` (AF-1).
+- Also removed: episode memory (`paused_since`, issue number), and with it all transition detection inside `hos-cron` (A2-5).
+
+### A2-3: Who decides; what the reading file holds (P1; supersedes AD-3's `machine_decision` and AD-7's per-role status write; D4, D6, FR-33)
+
+- **`hos-cron` is the decider.** Each cycle, `usage_pause.py check` loads and validates the **current** `usage-pause.conf` itself and computes the decision from that conf, the reading file's raw values and read status, and the clock. AD-7's "the consumer recomputes" rule now has no exceptions.
+- **The reading file holds the poller's raw reading and read status.** That covers every parsed field (A2-7, A2-8), `outcome`/`reason`/`detail`, `remote_exit`, `consecutive_failures`, `last_success_epoch`, and `diagnostics`.
+- **It also holds the poller's view, marked informational:** `poll_settings_status=valid|defaults|invalid:<key>`, `poll_pause_condition=0|1`, and `poll_pause_reason`. *Departure from the P1 default, with reason:* FR-33 (from D1/D4) requires the reading file to carry "the resulting pause decision with its reason", and D4 requires it to "name the bad key". These fields are also what the `pause_condition`/`settings_valid` gauges and the history backfill are rendered from (A2-11). Keeping the decision authority in `hos-cron` and the poller's view in clearly named `poll_*` keys meets both rulings.
+- **Binding:** `usage_pause.py check` never reads any `poll_*` key. A static test asserts this. A test with a reading that says `poll_pause_condition=0` and an over-threshold `session_pct` asserts **pause**.
+- **Disagreement.** The poller and `hos-cron` can disagree when the conf is edited between polls. When they do, `hos-cron`'s per-cycle evaluation governs the pause, and the gauges catch up at the next poll (at most `poll_interval_seconds`). The `hos-cron` log line names the bad key: `[PAUSED-USAGE] settings_invalid:<key> (fail_mode ignored)`. The poller validates the conf only to set `poll_settings_status`, `settings_valid`, and the threshold gauges.
+
+### A2-4: Global, stateless pause, separate from `hos-suspend`; gate placement (amends AD-7; D7b, D2)
+
+- **Scope.** All projects and both roles on the host consume the same reading and the same machine conf, and each decides the same way. That makes the pause global with no shared mutable state. It is **stateless**: the pause has no marker, no state file, and no memory. Each cycle decides from scratch (AD-7). Interactive sessions are never gated. The gate exists only in `hos-cron`.
+- **Separate from `hos-suspend`.** AD-7's rule and its static test stand: no read, write, or clear of `~/.hos/suspend/`, and no call to `hos-suspend`. The existing suspend check still runs first.
+- **"Only where the running `hos-cron` copy has the gate" (D7b).** The gate code carries a fixed sentinel comment, `# HOS-USAGE-PAUSE-GATE schema=1`. `hos-usage-poll --check` adds a read-only item: for every user-crontab line that invokes a `hos-cron`, it resolves the invoked file and reports PASS if the sentinel is present and FAIL naming the path if not. The runbook requires a green result after every upgrade of any project.
+- **Placement (supersedes AD-7's "after git credentials").** That placement existed only because AD-8 needed `GH_TOKEN`, and D7 removed that dependency. The gate now goes **immediately after the audit helper is defined (`bin/hos-cron` :361-366), with the overlap lock held, and before audit-log sync (:367)**. It therefore runs before worktree hygiene, the dependency check, jitter, wakeup handling, the GitHub App token mint (:834), `claude-auth.env` (:877), and every GitHub or Claude call. The benefits:
+  - a paused cycle makes **zero network calls of any kind**, so AC-35 is testable at the whole-cycle level, not just for the gate block;
+  - wakeup markers are left for the next running cycle;
+  - a paused cycle costs milliseconds.
+
+  The TD fixes the exact line and confirms nothing in :334-366 that the gate needs is missing. A missing `python3` is caught here as `check_error`, which pauses (AD-7 rule 5).
+- **In-flight (D2, P9).** AD-7's cycle-start-only rule is confirmed. **This feature adds no in-flight bound of its own.** The existing per-fire cap (`HOS_CRON_MAX_SECONDS`) applies unchanged. No test or code in #1944 depends on that cap's value.
+
+### A2-5: No GitHub calls; AD-8 removed; what visibility remains (supersedes AD-8 entirely; D7, D3, Q17, P2)
+
+- **Removed:**
+  - the `[PAUSED]` and `[DEGRADED]` issues;
+  - the invalid-settings issue;
+  - dedup, the issue lock, and auto-close;
+  - `failopen_issue_after`;
+  - transition detection;
+  - the `cycle-usage-pause`/`cycle-usage-resume`/`cycle-usage-degraded` transition events.
+- `usage_pause.py` and the gate block contain no `gh`, no `curl`, and no GitHub URL. A static test enforces this, and AC-35 enforces it at runtime with a stubbed `gh` that fails the test if called. TD-O-2 and ESC-T3 are moot.
+- **Per-cycle log line (binding).** Every gated cycle prints exactly one line to the existing cron log:
+  - `[PAUSED-USAGE] <reason>` on a pause;
+  - `[USAGE-OK] <summary>` on a run with a fresh successful reading;
+  - `[USAGE-UNCHECKED] fail_mode=open <reason>` on a fail-open run without a usable successful reading.
+- **Audit (P2 overridden, with reason).** P2 recommended audit events on pause/resume transitions only. D6 removed the only place `hos-cron` could remember the previous decision, and a stateless gate cannot detect a transition without reintroducing exactly the per-role state D6 removed. D6's own rationale is that "per-cycle decisions are already in the hos-cron log **and the audit events**". So:
+  - **one `cycle-usage-paused` audit event per paused cycle**, with fields `role`, `reason`, `session_pct`, `weekly_all_pct`, `reading_age_s`, `fail_mode`, `settings`, one `key=value` per `_audit` argv element (A1 confirmation);
+  - **no event on a running cycle**. The existing `cycle-start` event (:1823) records it;
+  - resume is visible as a `cycle-start` with no preceding `cycle-usage-paused`.
+
+  Growth is bounded by cycle cadence and is lower than a running cycle's (a running cycle emits `cycle-start` plus several subagent events). This is not per-poll (FR-34). **No decision reads an audit event** (ADR-1604 AD-4 rule, unchanged).
+- **Human visibility** is now: Grafana alerting (A2-13) on faberix; the cron log line everywhere else. A2-15 covers what that means for consumers.
+
+### A2-6: Three pause thresholds (amends AD-4 per-model, AD-7 rule 3, AD-9; D1)
+
+- **Decision rule 3 becomes:** on a usable `outcome=success` reading, **pause iff** `session_pct >= session_threshold` **or** `weekly_all_pct >= weekly_threshold` **or**, for **any** per-model line present, `weekly_model_pct >= weekly_model_threshold`. The comparison is `>=` everywhere.
+- **Resume** happens when all present limits are `<` their thresholds.
+- One `weekly_model_threshold` applies to every model line.
+- **A missing per-model line is not a failure** and contributes nothing. Only the session and all-models lines are required (FR-11 unchanged).
+- **Reason format (binding, stable for log greps).** Every limit at or over threshold is listed, in the fixed order session, `weekly_all`, then `weekly_model:<Name>` sorted by name, joined by `; `, and capped at 200 chars. Example: `weekly_model:Fable 91% >= 90`. `<Name>` is the raw model name with control characters stripped, length-capped. The gauge label uses the sanitized form (AD-10).
+- The AD-4 per-model sentence "gauges only and never feed the decision" is superseded.
+
+### A2-7: `--output-format json`; parse `result`; revised failure classification (amends AD-4; D13, D12)
+
+- **The read returns a JSON envelope.** The poller parses **all of stdout** as one JSON object, using strict `json.loads` on the decoded, 64 KiB-capped bytes. It never scans for a JSON fragment inside other text.
+- The threshold text is the envelope's `result` field, which must be a string. AD-4's regexes, last-match-wins rule, no-clamping rule, integer-only rule, ANSI stripping, and U+00B7 handling all apply to `result`.
+- **No unseen field is depended on (D13, FR-2).** The parser reads exactly three fields: `result`, `total_cost_usd`, and `usage.{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens}`. Every other field is ignored, and adding or removing other fields changes nothing (AC-49).
+- **Success (FR-11, D12/A1-3 confirmed)** is unchanged: both `% used` lines parsed from `result`. A non-zero remote exit with both lines parsed is a success, with `remote_exit` recorded. ssh, spawn, and timeout failures fail regardless of content. **Cost 0 / tokens 0 never establishes success** (D13).
+- **Failure enum (supersedes AD-4 and A1-2's list; closed, stable):**
+  - `ssh_failed`
+  - `timeout`
+  - `spawn_failed`
+  - `envelope_invalid`: stdout is not one JSON object, or `result` is missing or not a string
+  - `empty_session`: valid envelope, and `result` is empty/whitespace or contains the legacy `Total cost:` / `Usage: 0 input` markers, with no `% used` line
+  - `missing_session`
+  - `missing_weekly`
+  - `unparseable`: non-empty `result` with neither line, not the empty shape
+  - `crashed`
+
+  `claude_not_executable` is **removed** from the poll-time enum. The client no longer names the binary (A2-9), so a bad path shows up as `envelope_invalid`. It survives only as a `--check` line item. The TD pins the JSON empty-session fixture synthetically until a real one is captured. The capture-2 envelope becomes the second real fixture.
+- **Breakdown (AD-4, FR-17) is reconfirmed under capture 2.** Every breakdown line is **individually optional**. Capture 2's `Last 7d` window has no `8+ hours` line, and that series is absent, not 0 (AC-18). Window headers are matched generically as `Last (\S+) · N requests · M sessions`, with the window label sanitized. The parser does not assume only `24h`/`7d` exist.
+- **`--check` captures the full envelope (D13, AC-49).** This is a narrow exception to AD-6's "`--check` writes no state". `--check --capture-fixture <path>` writes the unfiltered stdout of its real read to the operator-named path, and nowhere else. Plain `--check` still writes nothing. The captured file is committed as a fixture by a later PR.
+
+### A2-8: Read-cost gauges (P5, D13)
+
+- **`read_cost_usd`** = the envelope's `total_cost_usd` (float, ≥ 0 as reported).
+- **`read_tokens`** = **one summed value**: `input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens`. `output_tokens_details.thinking_tokens` is **not** added, because it is a sub-count of output and adding it would double-count.
+- The reading file and history also carry each of the four token counts separately (A2-11). Only the sum is a gauge.
+- Each value is recorded whenever the envelope parsed, **including on a failed read** (`empty_session` is exactly when a stray model call would show). If any of the four token fields is missing or non-numeric, `read_tokens` is **absent**, not a partial sum. The same applies to cost.
+- **Any non-zero value fires the alert** (A2-13). An absent cost or token value on a successful read also fires (`HosClaudeUsageReadCostUnknown`), so a CLI change that drops the field cannot silently disable the FR-9 check.
+
+### A2-9: The forced command; the call site; credential hygiene (supersedes AD-5's command text and AD-6's `authorized_keys` recommendation and client-side unsets; amends A1-1; D5, P4, P8)
+
+- **The `authorized_keys` line is exactly** `from="127.0.0.1,::1",command="<abs claude_bin> -p /usage --output-format json" ssh-ed25519 AAAA… hos-loopback`. It has those two options and **no others**: no `restrict`, and no `no-pty`/`no-port-forwarding`/`no-agent-forwarding`/`no-X11-forwarding`/`no-user-rc` (P4; the human ruled against `restrict` as fragile, and the individual options carry the same risk).
+- **No environment unsetting anywhere.** There is no `env -u`, no `unset`, no `os.environ.pop`/`del`, and no curated `env=` for the ssh subprocess. The poller passes its inherited cron environment through, apart from AD-6's pinned `PATH`, which sets a variable and removes none.
+- The AD-6 "the poller `unset`s the three variables in its own process" sentence is superseded. AC-15's static test now asserts the **absence** of every unsetting form on both sides, as well as the absence of `claude-auth.env` sourcing.
+- **The client sends no remote command.** The ssh argv ends at the host (`… 127.0.0.1`). sshd runs the forced command for the session request. *Reason:* if the client also sent `claude -p /usage …`, a line that had lost its `command=` would still produce a successful read while granting an unrestricted shell, and nobody would notice. With no client command, a missing forced command gives a login shell on `/dev/null` stdin, which produces no JSON (`envelope_invalid`). D5's restriction therefore becomes a precondition of every successful poll, not just of `--check`. AD-6's other ssh options stand.
+- **The claude path is host-specific (P8).** It is never hardcoded in HOS. `hos-usage-poll remote-cmd` prints the forced-command text, built from `claude_bin` (setting, or resolved with the pinned PATH), and `--print-setup` embeds that output. The only `claude … /usage` string in the tree is the template constant in `bin/lib/usage_pause.py` (A1-1's `REMOTE_CMD_TEMPLATE`, now `"{claude_bin} -p /usage --output-format json"`), and it is never executed by HOS code.
+- **T4.1b** pins:
+  - that template exactly (no `--model`, no prompt, no other flag);
+  - that it is the sole `/usage` string under `bin/`, `scripts/`, `bootstrap/`;
+  - that the poller's ssh argv has no element after the host.
+
+  A1-1's T4.1 exemption mechanics stand. The exemption reason becomes "non-agent `/usage` forced-command template; executed by sshd, not HOS (ADR-1944 A2-9)".
+- **`--check` line 2 (amended):** the `authorized_keys` line for the key must be byte-equal, in its options and command, to the `remote-cmd` output. A difference fails the check and names the difference.
+- **Residual risk, recorded and ACCEPTED (D5; human ruling "notoriously fragile").**
+  - **Environment.** Nothing scrubs the server-side environment. Correctness relies on (i) the login environment never exporting `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_*`, and (ii) sshd's `AcceptEnv` and the client's `SendEnv` not carrying them (the Ubuntu defaults carry only `LANG LC_*`). **Detector:** `/usage` under the OAuth token returns the empty-session shape, so the leak shows up as a failed read (`empty_session`). That pauses under fail-closed and fires the read-failed alert. It is caught by `--check`'s real read at setup and by every later poll.
+  - **No `restrict`.** Without it, the key holder can request port forwarding and a pty. The key is mode 0600 and owned by scott, and `from=` admits loopback only, so anyone able to use it is already scott on faberix. There is no escalation. security-reviewer reviews this residual in S1.
+- **AD-12/AC-48:** the swapped-in line is not final until a real `--check` read returns real percentages. That run is an S1 exit criterion.
+
+### A2-10: Settings (supersedes AD-9's table and its issue clause; D1, D4, D18, D19, P3)
+
+| Key | Default | Valid |
+|---|---|---|
+| `session_threshold` | `90` | integer 1-100 |
+| `weekly_threshold` | `90` | integer 1-100 |
+| `weekly_model_threshold` | `90` | integer 1-100 (new, D1) |
+| `fail_mode` | `closed` | `closed` \| `open` |
+| `poll_interval_seconds` | `300` | integer multiple of 60, 60-3600 |
+| `staleness_seconds` | `900` | integer `> poll_interval_seconds + read_timeout_seconds`, ≤ 7200 (A1-4) |
+| `read_timeout_seconds` | `60` | integer 5 to `poll_interval_seconds − 30` |
+| `history_days` | `90` | integer 1-3650 (new, D18) |
+| `history_max_mb` | `100` | integer 1-10240 (new, D18) |
+| `claude_bin` | unset → resolved | absolute path matching A1-4's pattern; used only by `remote-cmd`/`--print-setup`/`--check` |
+
+- **Removed:** `failopen_issue_after`. Because unknown keys are invalid, a conf still carrying it pauses with `settings_invalid:failopen_issue_after`. No host has such a conf today.
+- **P3 confirmed.** `staleness_seconds ≤ poll_interval_seconds` is invalid (A1-4's bound is stricter and implies it), and an unknown `fail_mode` is invalid.
+- **D4 confirmed.** A missing file means the defaults. Any of the following **pauses regardless of `fail_mode`** with `settings_invalid:<key>`: an unreadable file, an invalid value, an unknown key, or a duplicate key. That **includes the history keys**: D4 makes no exception, so a typo in `history_days` pauses all autonomous work. This is safe-direction, and it is recorded so it is not a surprise.
+- **No issue is filed** (D7). The bad key is named in the `hos-cron` log line (authoritative, A2-3), in the reading file's `poll_settings_status` (as of the last poll), and through the `settings_valid=0` gauge and alert.
+- **The poller under invalid settings** keeps polling with **defaults for its own operational keys only** (`read_timeout_seconds`, `history_*`). It records `poll_settings_status=invalid:<key>`, emits `settings_valid=0` and `poll_pause_condition=1`, and emits no threshold gauges (A1-5 stands).
+- **No hardcoded thresholds (D19).** Every numeric limit the poller or gate compares against comes from this table. The defaults live in one named constant block at the top of `usage_pause.py`. A static test asserts that no other numeric literal in the module equals a default threshold within a comparison.
+
+### A2-11: History log, `last-raw`, export, write order (extends AD-10 isolation; D18, P6, FR-52-FR-55)
+
+- **History.** One JSON object per poll is written to `~/.hos/usage-pause/history/usage-YYYY-MM-DD.jsonl` (the UTC date of `run_epoch`). **The line carries every key in the reading file** (P6): raw percentages, per-model values, every breakdown field, cost, the four token counts, outcome/reason, and the `poll_*` fields. A backfill can therefore restore every dashboard panel, including the pause annotations and the threshold lines.
+  - The line is written as **one `write(2)` with `O_APPEND`** and is ≤ 16 KiB (oversized optional fields are dropped first, breakdown before core).
+  - A torn final line from a crash is skipped by `export`, which counts and reports it, never fatally.
+  - Directory mode 0700, files 0600.
+- **Pruning** runs on every poll, **after** the history append. It deletes files whose date is older than `history_days`, then deletes the oldest remaining files until the total is ≤ `history_max_mb`. Whichever limit is hit first governs, and today's file is never deleted. Only names matching `usage-\d{4}-\d{2}-\d{2}\.jsonl` in that directory are ever touched, which stops a bad config from deleting anything else. Pruning failure counts as a history-write failure.
+- **`last-raw`.** `~/.hos/usage-pause/last-raw` (0600) holds the full raw stdout of this poll's read (capped at 64 KiB) plus a header line with `run_epoch`, the ssh exit, and the timeout flag. It is overwritten each poll, atomically through `.tmp` + rename. On a transport failure it holds the stderr tail instead. It is debugging data, and nothing reads it for a decision.
+- **Write order (binding, D18):**
+  1. the reading file (the decision input);
+  2. the `.prom`;
+  3. the history line plus pruning;
+  4. `last-raw`.
+
+  Steps 2-4 are each independently best-effort. Each is wrapped so that a failure is logged to `poll.last.log` and changes nothing earlier in the sequence.
+- **`history_write_ok` vs the order.** The `.prom` is written before the history attempt, so it cannot carry that attempt's result. **Resolution:** after step 3, the poller **re-renders and atomically replaces the `.prom` once more** with this poll's `history_write_ok`. The first render omits the gauge, so for milliseconds it is absent, never a false 1. The re-render is itself best-effort. This keeps D18's order, since the reading file is still first and untouched. The isolation test (AD-10) extends to all three best-effort steps.
+- **Export (FR-53).** `hos-usage-poll export --from <ISO|epoch> --to <ISO|epoch>` reads the history files and writes OpenMetrics to stdout. Each history line yields its gauges with the line's `run_epoch` as the sample timestamp, using **the same metric names, labels, and absent-not-zero rules as `render_prom`**: one renderer, two clocks. The output ends with `# EOF`. It is read-only and takes no lock. The runbook covers `promtool tsdb create-blocks-from openmetrics` and moving the blocks into monitrix's TSDB. AC-38 is the round-trip test.
+
+### A2-12: Metrics contract (amends AD-10's table and A1-5; D8, D13, D19)
+
+The table changes are:
+- **`hos_claude_usage_threshold_percent{limit}`**: `limit` is `session` \| `weekly_all` \| `weekly_model` (replaces the `window` label). It is present only when settings are valid (A1-5).
+- **New: `hos_claude_usage_staleness_seconds`.** The staleness window the poller is using. It is **always present**, and under invalid settings it is the default value, so the poll-stale alert can still fire while `settings_valid=0`. It exists so the poll-stale alert compares against config, not a literal (D19).
+- **New: `hos_claude_usage_read_cost_usd` and `hos_claude_usage_read_tokens`** (A2-8). Present whenever the envelope yielded them, success or failure.
+- **New: `hos_claude_usage_history_write_ok`** (A2-11).
+- **`hos_claude_usage_settings_valid`** (A1-5, now D4-ruled).
+- **`hos_claude_usage_pause_condition`**: one machine-level series (D8). It is 1 iff, by the poller's evaluation, any of the three limits is at or over threshold, **or** the read failed under `fail_mode=closed`, **or** settings are invalid. Otherwise 0. It is the poller's view (A2-3). `hos-cron` may disagree for up to one poll interval after a conf edit, and when the poller is dead the series freezes. The stale alert covers that case.
+- **`hos_claude_usage_last_success_timestamp_seconds = 0`** when none is on record. This is the D8-ruled exception, and AD-10's interpretation is now confirmed.
+- **Breakdown series** take a generic `window` label (A2-7).
+
+Everything else in AD-10 stands: absent-not-zero, raw values only, label hygiene, the scott-owned `/var/lib/hos-usage` plus symlink, and the symlink-verification precondition and its fallback.
+
+### A2-13: Grafana alerting, contact point, worked example (supersedes AD-11 (2) and its Alertmanager routing; amends AD-11 (3); D17, D17b, D19)
+
+- **Grafana alerting, not Prometheus rules or Alertmanager.** `prometheus.yml` is untouched: `rule_files` stays commented and the `alertmanager` stanza is left alone. AD-11's `hos-claude-usage.rules.yml` is not shipped. Scrape config: AD-11 (1) stands.
+- **Provisioned files** are all under `contrib/monitoring/grafana/provisioning/`:
+  - `dashboards/hos.yaml` (AD-11 (3) stands; `allowUiUpdates: false`);
+  - `alerting/hos-rules.yaml` (folder `HOS`, one rule group);
+  - `alerting/hos-contact-point.yaml`.
+- **Rules route by rule-level notification settings** (simplified routing: each rule names the receiver `hos`). They do **not** provision a notification-policy tree, because provisioning policies replaces the whole tree on monitrix, which could clobber anything else configured there. The TD verifies that Grafana 13.2.3 supports rule-level `notification_settings.receiver` in file provisioning. **Fallback if it does not:** escalate. Do not provision the policy tree without a human ruling.
+- **Required alert rules (FR-62, D17), each comparing against a gauge or a named value, never a literal threshold:**
+
+| Rule | Condition (TD finalizes PromQL) |
+|---|---|
+| `HosClaudeUsagePauseCondition` | `hos_claude_usage_pause_condition == 1` |
+| `HosClaudeUsageReadFailing` | `hos_claude_usage_read_ok == 0` |
+| `HosClaudeUsagePollStale` | `time() - hos_claude_usage_poll_timestamp_seconds > on(instance) hos_claude_usage_staleness_seconds` |
+| `HosClaudeUsageMetricsAbsent` | `absent(hos_claude_usage_poll_timestamp_seconds{instance=~"$instance"})` (NoData handled explicitly) |
+| `HosClaudeUsageSettingsInvalid` | `hos_claude_usage_settings_valid == 0` |
+| `HosClaudeUsageReadCostNonzero` | `hos_claude_usage_read_cost_usd > 0` |
+| `HosClaudeUsageReadTokensNonzero` | `hos_claude_usage_read_tokens > 0` (separate rule, AC-41) |
+| `HosClaudeUsageReadCostUnknown` | read_ok == 1 and either cost/token series absent (A2-8) |
+| `HosClaudeUsageHistoryWriteFailing` | `hos_claude_usage_history_write_ok == 0` |
+| `HosClaudeUsageTextfileError` | `node_textfile_scrape_error > 0` (AD-11, retained) |
+| `HosMonitoringSyncStale` | A2-14 |
+| `HosClaudeUsageWeeklyTimeToThreshold` (warning, optional) | `predict_linear(...) >= on(instance) hos_claude_usage_threshold_percent{limit="weekly_all"}` |
+
+  - `== 0`/`== 1`/`> 0` against boolean or must-be-zero gauges are semantics, not thresholds.
+  - Pending durations (`for:`) and the sync-stale bound are **named values at the top of the rules file**: a YAML-anchor block such as `x-hos-named-values:` with `&hos_for_default 15m`. The TD verifies that Grafana's provisioning parser accepts anchors. **Fallback:** a header table of named values, plus a static test that every duration in the file appears in that table (AC-45).
+  - NoData and Error states are set per rule so that a missing series fires **only** `MetricsAbsent`/`SyncStale`, not every rule at once.
+- **Contact point `hos`** has two integrations (D17):
+  - **email**: a webhook to the Cloudflare Worker, with `authorization_scheme: Bearer` and the credential taken from a Grafana provisioning env-var reference;
+  - **SMS**: a webhook to an SMS relay, URL from an env var.
+
+  **The repo carries only variable names** (`HOS_ALERT_EMAIL_WEBHOOK_URL`, `HOS_ALERT_EMAIL_WEBHOOK_SECRET`, `HOS_ALERT_SMS_WEBHOOK_URL`) and the README documents setting them in Grafana's env file on monitrix (`/etc/default/grafana-server`, mode 0640 root:grafana). A static test rejects any `https?://` other than placeholders or documentation hosts, and any token-shaped string, under `contrib/monitoring/` (AC-47). Until an SMS provider exists (D-5), the SMS URL is a documented non-routable placeholder. The TD verifies that a failing SMS integration does not suppress the email integration. Grafana delivers per integration, and AC-43 proves it.
+- **Datasource reference.** Alert rules reference the Prometheus datasource by UID through an env var or a documented README substitution. They never hardcode monitrix's UID.
+- **Worked example, not a requirement (D17b).** `contrib/monitoring/README.md` plus `docs/MONITORING-WORKED-EXAMPLE.md` (TD may merge the two) present faberix poller → node_exporter → monitrix Prometheus → Grafana alerting → Worker email + SMS relay as **"our recommended setup"**. HOS guarantees only three things: the poller, the gate, and the metrics contract (A2-12's names, labels, and absent-not-zero semantics). The metrics contract is therefore versioned with the reading-file `schema`, and a rename is a breaking change recorded in release notes.
+
+### A2-14: monitrix delivery: sparse anonymous clone, sync job, sync health (supersedes AD-11's "human copies files" steps; D9)
+
+- **Clone.** On monitrix, a dedicated unprivileged user (`hos-sync`, human-created) owns `/opt/hos-monitoring` (0755, readable by `grafana`). It holds an anonymous-HTTPS clone of the public HOS repo, `--filter=blob:none --sparse`, with sparse-checkout `contrib/monitoring/`. There is no deploy key and no credential.
+- **Grafana points at the clone.** The dashboard provider `path` points into the clone. The alerting provisioning files are symlinked from `/etc/grafana/provisioning/alerting/` into the clone (one-time root step; the TD verifies Grafana follows those symlinks, with copying-at-sync as the fallback).
+- **Sync job.** It runs from `hos-sync`'s crontab every 5 minutes (named value), as a script **installed outside the clone** at `/usr/local/bin/hos-monitoring-sync` by the human. A pull can therefore never change the code that performs the pull (the D14 principle, applied to monitrix). It runs `git -C /opt/hos-monitoring pull --ff-only` and nothing else that mutates the clone. A non-fast-forward fails and leaves the old content in place. Its output goes to a fixed-path, overwritten log.
+- **Sync health gauges** are written with AD-10's owned-dir + symlink pattern into monitrix's node_exporter textfile directory (root step on monitrix, mirroring faberix):
+  - `hos_monitoring_sync_last_success_timestamp_seconds` (0 if none);
+  - `hos_monitoring_sync_ok` (1/0);
+  - `hos_monitoring_sync_deployed_commit_info{commit="<sha>"} 1`;
+  - `hos_monitoring_sync_stale_after_seconds` (named value in the installed script's header).
+- **`HosMonitoringSyncStale`** fires on `time() - last_success > on() stale_after` or `sync_ok == 0`.
+- **D9 premise correction: Grafana reloads provisioned dashboards on its own, but not alert rules or contact points.** Alerting provisioning is read at startup or through the admin reload API. Without a reload, a pushed rule change would show up in `deployed_commit` while Grafana kept running the old rules, and no gauge would notice. **Binding:** after a pull that changed anything under `grafana/provisioning/alerting/`, the sync job triggers an alerting reload. The mechanism is a human checkpoint (A2-20 item H-3) because it adds a privilege on monitrix. **Recommended:** the sync job touches a sentinel file, and a root-owned, human-installed systemd `.path` unit restarts `grafana-server` on it. This needs no new credential and runs no repo code as root. The alternative is a Grafana service-account token used for `POST /api/admin/provisioning/alerting/reload`. Until it is ruled, the README says "restart grafana-server after any alerting change" and AC-50's evidence includes a restart.
+- **`contrib/monitoring/**` becomes protected surface (new, binding).** With issues gone (D7), these alert rules are the **only** human-facing signal of a pause, a broken check, or a non-zero read cost. Under AD-11 they sat in unprotected `contrib/`. A worker PR could then delete `HosClaudeUsagePauseCondition` or the cost alert at LOW tier, the overseer could auto-merge it, and monitrix would pull it within 5 minutes. That is the agent weakening its own alarm: AF-2's failure class, moved from the brake to the alarm. S4 adds `contrib/monitoring/**` to `scripts/framework/protected_surfaces.txt` (→ CODEOWNERS → HUMAN_REQUIRED). This is stricter, so it needs no product ruling, but it is itself a protected-surface edit that the human approves in S4's PR.
+- `hos_install.sh` never ships `contrib/` (AD-11 (4) test stands).
+
+### A2-15: Consumers (resolves ESC-1 as option (a); amends AF-4; D10)
+
+- **Option (a), as ruled.** A consumer host with the gate and no poller pauses every cycle (fail-closed) with `[PAUSED-USAGE] reading_missing` in the cron log. The log uses `poller_not_installed` when the reading file, `usage-pause.conf`, and `~/.ssh/hos_loopback` are all absent. This lasts until the host runs the §2a setup or sets `fail_mode=open`. There is no issue and no consumer-default-off switch.
+- **Release notes and the upgrade checklist** (TD names the files) carry:
+  - the setup step;
+  - the fact that an upgrade without it stops autonomous work;
+  - for API-key-billed consumers (who have no subscription `/usage`), the fact that `fail_mode=open` is their only route, and that it means **no usage protection**.
+- **Open: P7** (A2-20 H-1). A consumer can run fail-open with no poller and no alerting. That is silent, and this amendment does not decide it.
+
+### A2-16: Install path defined in one place (amends AD-2, AD-6 crontab; D14)
+
+- **The single definition** of where the poller runs from is the **poller crontab line**. `--print-setup` generates it from the poller's own resolved path (`realpath` of argv[0]), and the runbook shows it as the one line to change.
+- `hos-usage-poll` finds `usage_pause.py` relative to **its own resolved location** (`<dir>/lib/usage_pause.py`). The `hos-cron` gate finds it relative to `$_HOS_CRON_DIR`.
+- No HOS code computes a clone path, calls `git rev-parse`, or assumes it runs inside a git work tree. A static test greps the poller and library for `git ` and `.git`.
+- The `authorized_keys` line contains only the claude path, never an HOS path.
+- When #1276 vendors `bin/` outside the tracked trees, exactly one crontab line changes (plus each project's `hos-cron` lines, which #1276 owns).
+- **ESC-T1 / A1-7 cross-clone writable `bin/`** is an ACCEPTED near-term risk (D14). There is no separate issue. It is closed long-term by #1276 and v0.7.4 sandboxing.
+- AD-2's version-skew rule stands: `schema=1`, and an unknown schema is unusable.
+
+### A2-17: In-flight (P9, D2)
+
+Restated for the TD as a single binding line: **this feature adds no in-flight bound of its own.** The gate decides only at cycle start (AD-7, D2), the existing cycle cap applies unchanged, and no #1944 code reads or sets `HOS_CRON_MAX_SECONDS`.
+
+### A2-18: Slicing, tiers, and definition of done (supersedes AD-12 and A1-6's S4 wording)
+
+| Slice | Contents | Tier | Merge |
+|---|---|---|---|
+| **S1: Poller read path** | `bin/hos-usage-poll` (poll, `remote-cmd`, `--print-setup`, `--check` incl. `--capture-fixture` and the every-`hos-cron`-copy item); `bin/lib/usage_pause.py` (JSON envelope parse, AD-4 regexes on `result`, three-threshold evaluate, settings incl. history keys, reading file I/O, cost/token fields); `last-raw`; fixtures (capture 2 envelope, synthetic JSON empty-session, AC-1 shape); T4.1b + T4.1 exemption; static tests (no unsetting, no `claude-auth.env`, no `suspend/`, no GitHub, no `git`, no `poll_*` read by `check`); `framework_consumer_files.txt`; CRON-SETUP §2a. **Exit:** AC-16 (real cron-fired success), AC-48 (forced-command line final), AC-49 (full envelope captured), AC-25 (recorded cost 0 / tokens 0) all recorded on faberix. | **HIGH** | HUMAN_REQUIRED (`bin/**`) |
+| **S2: `hos-cron` gate** | A2-4 placement and sentinel; AD-7 rules with A2-3/A2-6; per-cycle log line; `cycle-usage-paused` audit; AC-34/AC-35 whole-cycle tests (stub `gh`, stub `claude`, zero calls). | **HIGH** | HUMAN_REQUIRED (`bin/**`, FR-49) |
+| **S3: Metrics side path** | `render_prom` (A2-12) with re-render; history append + prune; `export`; isolation tests for all best-effort steps; `--check` `.prom` item; faberix root step runbook (symlink verification precondition, AD-10). | MEDIUM | HUMAN_REQUIRED (`bin/**`) |
+| **S4: Monitoring worked example** | `contrib/monitoring/` dashboard JSON, dashboard provider, Grafana alert rules, contact point (placeholders), sync script + its README install steps, worked-example doc; `protected_surfaces.txt` += `contrib/monitoring/**` (+ CODEOWNERS regen); static tests (no literal thresholds AC-45, no secrets/endpoints AC-47, not installed by `hos_install.sh`, metric names match `render_prom`, YAML/JSON structure); `integration`-marked `promtool`/Grafana-lint tests skipped when the tool is absent. | **MEDIUM** (raised from LOW-MEDIUM: these alerts are now the only human signal) | HUMAN_REQUIRED (protected surface after this PR; the PR itself edits `protected_surfaces.txt`) |
+| **S5: Live delivery (no code)** | Human applies the monitrix steps (sync user, clone, provisioning symlinks, env file secrets, textfile symlink, reload mechanism) and the faberix S3 root step. Recorded evidence: AC-42, AC-43 (email; SMS deferred to D-5), AC-50, then **AC-44, a real pause alert received by email**. | n/a | Recorded on #1944 |
+
+- **Ordering.** S1 → S2. S1 → S3 → S4 → S5. S2 may merge and run as soon as S1 is deployed and `--check` is green, before S3-S5 (A2-1).
+- **Definition of done.** #1944 closes only when S1-S4 are merged **and** S5's AC-44 run is recorded. S3/S4 landing without S2 never closes it, and neither does S2 without S5. A blocker on any slice keeps the issue open and escalates (AD-1).
+- **Fail-open gate.** `fail_mode=open` on faberix is forbidden until S5's AC-43 and AC-44 are recorded. The runbook states this.
+
+### A2-19: Escalations, updated
+
+- **ESC-1:** resolved, option (a) (D10, A2-15).
+- **ESC-2:** still human actions. The list is now: faberix S1 key/`authorized_keys`/`known_hosts`/crontab; the faberix S3 root step; and monitrix S5 (A2-14).
+- **ESC-3:** removed (D3, D7). There is no dead-poller issue. The poll-stale and metrics-absent alerts replace it.
+- **ESC-4:** resolved. The single-page dedup defect and the collapsed `_audit` at `hos-cron:2054` are filed as **#1946**. #1944 no longer has any dedup code, so it has no dependency on the fix.
+- **ESC-T1:** accepted risk (D14, A2-16).
+- **ESC-T3, TD-O-2:** removed (D7).
+
+### A2-20: Human confirmation required (supersedes §5 and Amendment 1's §5 additions)
+
+**Resolved by D1-D19**, so these are no longer open:
+- §5.1 AS-1: superseded by D1, three triggers.
+- §5.2 AS-2: confirmed, D2.
+- §5.3 AS-3 + derived dead-poller issue: superseded by D3/D7, alerting.
+- §5.4 Q11: confirmed, D4, minus issue filing.
+- §5.5 Q12: D5, forced command without `restrict`.
+- §5.6 Q5: D6, one reading file.
+- §5.7 Q15: moot, D7.
+- §5.8 FR-42/FR-44 interpretations: D8.
+- §5.9 Grafana provisioning: D9.
+- §5.10 ESC-1: D10 (a).
+- A1 §12 FR-11 narrowing: D12.
+- A1 §13 AC-25: D13.
+- A1 §14 cross-clone `denyWrite`: D14, accepted.
+- A1 §15 and §16: filed as #1946.
+
+**Decided here as design-level (P-rulings), for the human's awareness. No action needed unless the human disagrees:**
+- P1: `hos-cron` decides. The reading file holds the raw reading plus an informational `poll_*` view, which is a deliberate partial departure from the default (A2-3).
+- P2: **overridden.** There is one audit event per paused cycle, not per transition, because a stateless gate cannot detect transitions (A2-5).
+- P3: confirmed (A2-10).
+- P4: exactly `from=` + `command=`. The residual is accepted, and the detector is the real read (A2-9).
+- P5 (A2-8).
+- P6 (A2-11).
+- P8: host-specific path from `remote-cmd` (A2-9).
+- P9 (A2-17).
+
+**Still requiring the human:**
+- **H-1 (P7, product boundary). A consumer running `fail_mode=open` with no poller and no alerting is silent.** Every cycle runs with no usage protection, and the only trace is a `[USAGE-UNCHECKED]` line in a cron log nobody reads. D10 allows `fail_mode=open` as the way past the no-poller pause, and D17b makes alerting optional, so nothing in the rulings prevents this. **Architect recommendation:** keep D10 as ruled. Do **not** narrow fail-open to exclude a missing reading file, because that would leave API-key-billed consumers, who have no `/usage`, permanently paused with no lever. Add two things: (i) one `cycle-usage-unchecked` audit event per fail-open cycle that runs without a fresh successful reading, so the consumer's audit trail records every unwatched cycle; and (ii) release-note and runbook text stating plainly that "fail-open without a poller = no usage protection". The alternative is to require a separate explicit acknowledgement key (e.g. `usage_check=unavailable_acknowledged`) before fail-open applies to a *missing* reading file. That is stricter, but it adds a setting D10 did not ask for. **Human chooses: recommendation, the alternative, or accept as-is.**
+- **H-2 (new, governance): `contrib/monitoring/**` → protected surface** (A2-14). This is binding as a stricter control, but it extends the protected-surface list and so needs the human's approval on the S4 PR. Confirm that this is wanted rather than kept as normal-tier.
+- **H-3 (new, operational obligation on monitrix): the alerting-reload mechanism** (A2-14). Grafana does not hot-reload alert rules or contact points, contrary to D9's premise, which holds for dashboards only. Options:
+  - **recommended:** a root `systemd .path` unit that restarts `grafana-server` on a sentinel the sync job touches;
+  - a Grafana service-account token for the admin reload API (a new credential on monitrix);
+  - a manual restart after each alerting change.
+- **H-4 (new, AC-44 procedure).** The definition-of-done run lowers `session_threshold` to force a real pause, which pauses all autonomous work on the host for one or more poll intervals. Confirm the procedure, or name another way to produce a real `pause_condition=1`.
+- **H-5 (new, informational, safe direction).** Under D4, an invalid `history_days`/`history_max_mb` pauses all autonomous work, just as a bad threshold does. Recorded so it is not a surprise. A ruling is needed only if the human wants operational keys exempted, which would loosen D4.
+- **H-6 (carried human actions, not confirmations):**
+  - faberix S1: keypair, the `remote-cmd` `authorized_keys` line, `known_hosts`, the poller crontab line, `--check --capture-fixture`;
+  - faberix S3: the `/var/lib/hos-usage` + symlink root step;
+  - monitrix S5: the `hos-sync` user, clone, provisioning symlinks, Grafana env file with the Worker URL/secret, the textfile symlink, and the reload mechanism (H-3);
+  - removing the leftover `/tmp/diagnose_claude_usage_tty.sh` crontab entry. It is not part of the design, and it appends forever to `/tmp/claude_usage_diag.log`.
+- **Still open, not blocking (from requirements §6):** Q13 (reset text) stays as AD-3 had it, reading file only with no gauge. Q14 (runbook location) stays at CRON-SETUP §2a. Q18 is moot until D-2.
+
+### A2-21: New verification gaps (extends §0.4; each blocks only the slice named)
+
+1. Grafana 13.2.3 file provisioning, all S4/S5:
+   - accepts rule-level `notification_settings.receiver` (A2-13);
+   - accepts YAML anchors in alerting files (A2-13);
+   - follows symlinks in `provisioning/alerting/` (A2-14);
+   - interpolates env vars in contact-point settings (A2-13).
+2. Whether monitrix's own node_exporter is scraped by its Prometheus, and whether its textfile collector follows symlinks. The sync gauges depend on both (S5).
+3. The real JSON empty-session envelope shape (A2-7). The synthetic fixture stands in until one is captured. It is not blocking.
+4. The full unfiltered envelope (D-4, AC-49): S1 exit.
+
+### A2-22: Affected sign-offs
+
+- **TD-1944 (DRAFT):** built against AD-3's per-role status file, AD-8's issue machinery, AD-5's `env -u` command, the two-threshold rule, plain-text parsing, and AD-12's slicing. **It must be revised by `technical-design` against this amendment before any approval.** No TD sign-off exists yet, so none is orphaned. Architect review of the revised TD restarts at round 1 for the amended sections.
+- **Amendment 1 rulings:** A1-1 amended (A2-9), A1-2 stands (the in-process timeout; enum per A2-7), A1-3 confirmed (D12), A1-4 stands, A1-5 amended (A2-12), A1-6 amended (A2-18), and A1-7 accepted (D14). The "confirmed without change" AD-8 clarifications (exact-title dedup, `gh api --paginate`, close-pending memory) are **void** along with AD-8.
+- **No code, test, or review sign-off exists for #1944.** The #1450 breaker code and its sign-offs remain untouched (FR-40, AC-17).
+
+**Self-flag.** RISK: HIGH, unchanged. The gate fronts every autonomous cycle on every host. Visibility now depends on host monitoring rather than GitHub. CONFIDENCE: HIGH on A2-1 to A2-12 and A2-15 to A2-18. MEDIUM on A2-13/A2-14 until the A2-21 Grafana gaps are verified. BLAST RADIUS: as §Human Review, minus GitHub issue traffic, plus `~/.hos/usage-pause/history/`, `last-raw`, monitrix `/opt/hos-monitoring`, a `hos-sync` user, Grafana provisioning, and `protected_surfaces.txt`. Change classification: STRUCTURAL (human-ruled). H-1 to H-4 must clear before the slice each one touches ships.
