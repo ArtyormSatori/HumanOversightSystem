@@ -1018,6 +1018,14 @@ def _bounded_audit_number(value: object) -> int | float | None:
     return value
 
 
+# Public aliases for dimension_sweep_cli.py (TD-D64, Amendment G): the runner's reuse key
+# and record bounding must be L2's own functions, never copies that could drift.
+matched_files_digest = _matched_files_digest
+bounded_audit_str = _bounded_audit_str
+bounded_audit_number = _bounded_audit_number
+extract_payload = _extract_payload
+
+
 def _write_audit_event(
     repo_root: Path,
     *,
