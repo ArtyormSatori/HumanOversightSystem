@@ -55,7 +55,7 @@ below is designed to be implementable without further design questions.
 > L29–L33 and plan rule PL1, a CORE `tools:` allowlist, and a `.hos-manifest` drift check, and
 > supersedes TD-D28's order lists (§E.5). Where it and Amendment C or D disagree, Amendment E governs.
 
-> **AMENDED 2026-10-03 — Amendment F (W5c: the explain-only sweep, the installer's registry-data step, the ship-list, #1930(b), #1951). DRAFT — requesting architect review; not binding until approved.** Places TD-D43 (i)–(iii) on W7's executor, not on the W5c sweep (TD-D50). Where it and §7.7/§7.9, §C.2.10/§C.2.11 or §E.8 disagree, Amendment F governs.
+> **AMENDED 2026-10-03 — Amendment F (W5c: the explain-only sweep, the installer's registry-data step, the ship-list, #1930(b), #1951). Architect-approved with edits, round 1 (§F.8). Binding on W5c.** Places TD-D43 (i)–(iii) on AD-13's runner, the first component that executes a deterministic `Binding.tool`, not on the W5c sweep (TD-D50). Where it and §7.7/§7.9, §C.2.10/§C.2.11, §E.2 (TD-D43's "W5c obligations" label) or §E.8 ("W5c inherits") disagree, Amendment F governs. *(architect, round 1)*
 
 **Date:** 2026-09-14 (original), amended 2026-09-16 (Amendment A), 2026-09-18 (Amendment B), 2026-10-02 (Amendments C, D), 2026-10-03 (Amendments E, F)
 **Iteration:** 1 of 5
@@ -5011,8 +5011,8 @@ no label was created, no comment was posted, nothing was committed, and no regis
 
 ## Amendment F (2026-10-03) — W5c: the explain-only sweep, the installer's registry-data step, the ship-list (#1930(b), #1951)
 
-**Status:** **DRAFT, Amendment F round 1 of 5. Requesting architect review. It is not handed to the coder
-until the architect approves.** W5a (#1933), W5b (#1943) and the hardening slice (#1952) have merged
+**Status:** **APPROVED WITH EDITS, Amendment F round 1 of 5 (§F.8). The round-1 edits marked
+"(architect, round 1)" are binding. It may be handed to the coder; no human ruling is required first.** W5a (#1933), W5b (#1943) and the hardening slice (#1952) have merged
 (`main` at `aac066168`). §D.9 and §D.10 recorded that W5c had no design. This is that design. Where it and
 §7.7, §7.9, §9.5 (T5.30, T5.31, T5.33), §C.2.10, §C.2.11, §C.2.12 (T5.44, T5.47, T5.48) or §E.8
 disagree, Amendment F governs. Everything it does not name stands.
@@ -5087,9 +5087,12 @@ location.**
 - So a leftover file survives when its pack is still resolved but `<pack_dir>/dimensions.yaml` is gone.
   That happens when a consumer-local pack drops the file, or a release removes it. TD-D32 then emits no
   row for the leftover.
-- L31 checks every pack file that exists (`dimension_registry.py:271-276`). Every load in that tree
-  therefore fails `installed_drift … has no row in .hos-manifest`. It fails closed, but the installer
-  broke the install.
+- L31 checks, for each slug in the resolved pack set, `pack-<slug>.yaml` if it exists on disk or has a
+  manifest row (`dimension_registry.py:271-276`). *(architect, round 1: corrected from "every pack file
+  that exists". An unresolved leftover is L20's `stale_pack_file`, not L31's. The conclusion is
+  unchanged, because the leftover here belongs to a resolved slug.)* Every load in that tree therefore
+  fails `installed_drift … has no row in .hos-manifest`. It fails closed, but the installer broke the
+  install.
 - **Resolved by TD-D54 step 1b.**
 
 **TD-VF-38 — GAP: the fresh-install commit hint omits `.hos-manifest`.**
@@ -5144,8 +5147,16 @@ location.**
   sources or passes on a `Binding.tool`.
 - **Where TD-D43 (i)–(iii) now bind:** their content is unchanged (an in-process `ResolvedRegistry`; an
   argv list `[root / tool, …]`; `tool` and `tool_sha256` for each executed binding). They now bind the
-  **first component that executes a binding**, which is AD-13's runner in W7. W7's TD inherits them
+  **first component that executes a binding**, which is AD-13's runner. W7's TD inherits them
   verbatim.
+  - *(architect, round 1)* AD-13's runner first lands in **W6** (the ADR §5 measurement slice: "AD-13
+    runner, one judgment entry"), not W7. So the obligations bind **whichever of W6 and W7 first
+    executes a deterministic `Binding.tool`**. W6's TD must say whether it does. If W6 executes only its
+    one judgment entry, (i)–(iii) pass to W7 unchanged.
+  - *(architect, round 1)* For W6's TD (forward obligation, not designed here): the judgment-binding
+    analogue of (i) and (ii) binds W6. The agent, prompt and posture come only from a
+    `ResolvedRegistry` loaded in the same process, and the agent is reached through
+    `bootstrap/invoke_agent.sh` as an argv list. The analogue of (iii) is TD-D34's prompt hash.
 - **#1932's acceptance line** ("landed before W5c executes bindings") holds trivially.
 - **TD-D43 (iv) binds W5c as written.** The sweep loads the registry only through `plan` and through
   `resolve`, and never passes `--pack` to either.
@@ -5163,6 +5174,24 @@ respect only: errors are no longer discarded. The mapping from input form to git
   - if `HEAD~1` exists, it uses `git diff --name-only HEAD~1`, checked in the same way;
   - if it does not (a clean root commit), the set is empty and TD-D29 applies (exit 0).
 - **Outside a git work tree:** that is a git failure, so exit 1.
+- *(architect, round 1)* **Scope of "any git call".** The rule covers the **diff-computing** calls
+  (`git diff …`, and the `rev-parse --verify --quiet HEAD~1` above, where non-zero means "no parent").
+  The two §C.2.10 narrowing probes, `ls-files --error-unmatch` and `rev-parse --verify --quiet
+  <arg>^{commit}`, are **boolean**. A non-zero exit from either means "no", never "abort". As drafted,
+  "any git call that exits non-zero" would make every untracked explicit file argument exit 1. That is a
+  defect, because `nosuch.py` must exit 0 (T5.48). Consequence, stated: explicit file arguments still
+  work outside a git work tree, because no diff runs. Only the computed forms fail closed there.
+- *(architect, round 1)* **A repository with no commits.** `git diff --name-only HEAD` fails because
+  `HEAD` is unborn, so the no-argument form exits 1. That is correct: no diff was computed. `--staged`
+  still works there.
+- *(architect, round 1)* **Paths are read NUL-separated.** Every diff-computing call passes `-z`, and
+  the sweep reads its output with a bash-3.2-portable loop, `while IFS= read -r -d '' p; do …; done`
+  (no `mapfile`). Without `-z`, git's default `core.quotePath` emits a non-ASCII or control-character
+  path as a C-quoted string with surrounding `"`. A predicate such as `\.py$` then fails to match
+  `"caf\303\251.py"`, which gives a confident "not applicable" for a file that was changed. That is the
+  same false answer §C.2.10's narrowing forbids. The mapping from input form to git command is
+  otherwise unchanged. Empty arrays are expanded as `${arr[@]+"${arr[@]}"}` (`set -u` on bash 3.2),
+  as `hos_install.sh` does.
 
 **TD-D52 — one tree, one CLI contract (TD-VF-34).**
 - **Repo root.** `REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"`. Every git call
@@ -5191,6 +5220,13 @@ respect only: errors are no longer discarded. The mapping from input form to git
 - **Otherwise:** the sweep pipes the `plan` JSON into `"$PY" -c "$_RENDER_PY"`.
   - `_RENDER_PY` is a single-quoted bash variable holding Python that imports only `json` and `sys`.
   - If the renderer fails, the sweep exits 1.
+  - *(architect, round 1)* **Capture, check, then render. Never a live pipe.** The sweep captures the
+    CLI's stdout into a variable and its exit code into another, applies the TD-D52 exit table, and only
+    on CLI exit 0 feeds the captured JSON to the renderer, through a here-string or `printf '%s'`. With
+    `cli | renderer` under `pipefail`, a CLI failure would hand the renderer empty input. The renderer's
+    own traceback would then reach stderr beside the CLI's one-line diagnostic, and the TD-D52 table
+    (pass-through on 1, internal-error line on anything else) could not be applied. The same capture
+    rule applies to `--json`. A failed CLI must leave stdout empty, never partial JSON.
 - **Output format** (`<…>` is substituted, and the two-space indents are literal):
   ```
   Changed files (<n>):
@@ -5277,7 +5313,24 @@ The block runs these steps:
 - **The `ensure_line` change:**
   - Its two hard-coded `.gitignore:` prefixes become `$(basename "$file"):`. Every existing call passes
     `$GITIGNORE`, so their output is unchanged.
-  - Its presence test tightens from `grep -qF` to the whole-line `grep -qxF`.
+  - ~~Its presence test tightens from `grep -qF` to the whole-line `grep -qxF`.~~ *(architect, round 1:
+    struck. Tightening it for every caller is not output-neutral. Consumers whose `.gitignore` holds
+    `.claudetmp/*`, `/.claudetmp/`, or a commented-out `#.claudetmp/` currently satisfy the substring
+    test. They would get a new line appended on their next upgrade, so the claim "their output is
+    unchanged" is false for the eight `.gitignore` call sites (`hos_install.sh:734-749`).)*
+  - *(architect, round 1)* **Replacement: an opt-in whole-line mode.** `ensure_line` gains an optional
+    fourth argument. When it is the literal `exact`, the presence test is `grep -qxF`. Otherwise it
+    stays `grep -qF`, so the `.gitignore` callers keep their behaviour byte for byte. All three
+    `.gitattributes` calls pass `exact`. Whole-line matching is required there because a substring
+    test would treat a consumer's `contract/resolved-packs.txt -text=…` or
+    `#.hos-manifest -text` as already present. Whether the `.gitignore` callers should also be
+    whole-line matched is a separate, pre-existing question and is out of W5c's scope.
+  - *(architect, round 1)* **Missing-final-newline guard (all callers).** Before appending, if the file
+    exists, is non-empty, and its last byte is not `\n`, `ensure_line` writes a `\n` first, within the
+    same dry-run check. Today, appending to a file that lacks a final newline joins the new line onto
+    the consumer's last line. In `.gitattributes`, that silently corrupts one of the consumer's own
+    rules (`*.png binarycontract/dimensions/** -text`). This changes behaviour only in the case where the
+    current behaviour corrupts the file, so it applies to the `.gitignore` callers too.
 - **Why `-text` and not `eol=lf`:**
   - L31 hashes raw bytes, and #1951 says "do not normalise".
   - `-text` turns off all end-of-line conversion in both directions.
@@ -5350,7 +5403,11 @@ exception:
 
 **The PR body must name:**
 - the #1930(b) removal;
-- the new consumer `.gitattributes` write;
+- the new consumer `.gitattributes` write, *(architect, round 1)* presented as a **separately
+  strikeable decision**. The body says that it writes into a consumer-owned file, gives the three lines,
+  and names the fallback if the CODEOWNERS approver strikes it: drop step 4, the `exact` mode and T5.69,
+  and rely on L31's existing installer-remedy message (#1951's "documented decision" route). The
+  `-text` write lands only with that approver's explicit acceptance;
 - the installer-written `contract/resolved-packs.txt` (§C.4.1);
 - the `-m slow` evidence (TD-D58).
 
@@ -5392,7 +5449,9 @@ Every run sets `HOS_REGISTRY_PYTHON=sys.executable`, except the interpreter-rung
     | `HEAD~1` | sorted `git diff --name-only HEAD~1` |
     | no argument | sorted `git diff --name-only HEAD` |
     | no argument, after `git stash -u` | `["b.py"]` |
-    | no argument, a clean tree at commit 0 only | exit 0 and `[]` |
+    | no argument, a clean tree at commit 0 only | exit 0, and stdout is exactly `[]\n` *(architect, round 1: under `--json` the empty set emits the bare array, not the plan object, so this row asserts stdout bytes and not a `changed_files` key)* |
+    | *(architect, round 1)* explicit `café.py` | `["café.py"]` (the UTF-8 name, unquoted) |
+    | *(architect, round 1)* no argument, after modifying a committed `café.py` | contains `"café.py"` and no element beginning with a double quote (pins TD-D51's `-z`) |
 
   - **Usage and grammar:**
     - `--framework-only` exits 2 with the §C.2.10 line, and an unknown `-x` exits 2.
@@ -5418,6 +5477,12 @@ Every run sets `HOS_REGISTRY_PYTHON=sys.executable`, except the interpreter-rung
   - **Run:** the sweep, in both text and `--json` modes, on `myapp/views.py`.
   - **Assert:** exit 0; `core:lint/all` is applicable; `SENTINEL` does not exist; and the script source
     contains no `eval`.
+  - *(architect, round 1)* **Every tool, not one.** Replace **every** path in `core.yaml`'s `tools:`
+    allowlist that the staged tree holds, including `scripts/run_second_review.sh`, with an executable
+    that creates `<tmp>/SENTINEL-<basename>`. Then assert that no `SENTINEL-*` exists after both runs.
+    Swap only `lint_check.sh` and a defect that executes some other binding's tool passes the test. The
+    replacements must keep mode 755 so that L11 still loads the registry. The test therefore also proves
+    that the sweep loaded the registry, and did not skip the load, before declining to execute.
 - **T5.66 (TD-D43 (iv)).**
   - **Setup:** in `sweep_tree(["django"])`, add `.hos-release` and a `.hos-manifest` with correct WHOLE
     rows for `core.yaml`, `pack-django.yaml` and `resolved-packs.txt`.
@@ -5428,8 +5493,18 @@ Every run sets `HOS_REGISTRY_PYTHON=sys.executable`, except the interpreter-rung
   - **Source level:** the script contains no `--pack`.
 - **T5.67 (TD-D51).**
   - A staged tree **without** `git init`: exit 1, a `git diff failed` line on stderr, empty stdout.
+    *(architect, round 1)* The run sets `GIT_CEILING_DIRECTORIES` to the staged tree's parent. Without
+    it, a `tmp_path` that sits inside some other work tree makes `git -C` discover that repository, and
+    the case passes or fails by accident of where pytest puts its temporary directory.
+  - *(architect, round 1)* The same no-git tree with the explicit argument `myapp/views.py` exits 0. The
+    narrowing probes are boolean (TD-D51 scope), so explicit files need no repository.
   - `HEAD~5` in a 3-commit fixture: exit 1. Today this reports no changed files.
-- **T5.68 (TD-D53).** Input `myapp/views.py` with `{django}`.
+- **T5.68 (TD-D53).** Input `myapp/views.py` with `{django}`, staged with `project_text=None`.
+  *(architect, round 1: the 17/23 totals hold only with no `project.yaml`. A project layer adds
+  entries and bindings.)*
+  - *(architect, round 1)* **Capture rule:** in a tree where `core.yaml` is deleted, the text mode exits
+    1, stdout is empty, and stderr is exactly one line, the CLI's `dimension_registry: core_missing:`
+    line. A renderer traceback must not appear.
   - Every binding that `--json` marks applicable appears on a `+` line.
   - Every other binding appears on a `-` line, followed by its exact `reason`.
   - The last line matches `^\d+ of 17 dimension\(s\) apply; \d+ of 23 binding\(s\) fired\.$`.
@@ -5482,6 +5557,11 @@ Every run sets `HOS_REGISTRY_PYTHON=sys.executable`, except the interpreter-rung
   - **Control:** remove the three lines and commit, then repeat the re-checkout. `installed_drift`
     must now be raised, which proves the test discriminates.
   - `git check-attr text -- contract/dimensions/prompts/ui.md` reports `unset`.
+  - *(architect, round 1)* **Missing final newline:** a pre-existing consumer `.gitattributes` whose
+    last line is `*.png binary`, with no final newline, still holds `*.png binary` as its own whole line
+    after install, and `git check-attr binary -- x.png` reports `set`.
+  - *(architect, round 1)* **Near-miss line:** a pre-existing `#.hos-manifest -text` comment line does
+    not suppress the real `.hos-manifest -text` line (pins `exact` mode).
 - **T5.70 (TD-D54 step 1b, slow).** Install `--pack astro`, whose closure includes `node`, a pack that
   ships no `dimensions.yaml`. Plant `contract/dimensions/pack-node.yaml`, then re-install `--pack astro`.
   - The planted file is removed, and the warn line was printed.
@@ -5489,6 +5569,8 @@ Every run sets `HOS_REGISTRY_PYTHON=sys.executable`, except the interpreter-rung
   - `dr.load(target)` is green.
 - **T5.71 (TD-D56, static).** The installer's `git add` hint line contains `.hos-manifest` and
   `.gitattributes`.
+  - *(architect, round 1)* **TD-D55 scoping, static:** every `ensure_line` call whose first argument is
+    `$GITIGNORE` passes no fourth argument. Every call that targets `.gitattributes` passes `exact`.
 - **T5.72 (dry run, slow).** `--dry-run --pack django` on a fresh target:
   - it creates no `contract/dimensions/`, no `contract/resolved-packs.txt` and no `.gitattributes`;
   - stdout contains `Would write contract/resolved-packs.txt:`, followed by a `django` line.
@@ -5533,6 +5615,157 @@ Every run sets `HOS_REGISTRY_PYTHON=sys.executable`, except the interpreter-rung
 - **W5c is unbuilt**, so there are no orphaned approvals.
 - **W7 inherits TD-D43 (i)–(iii)** under TD-D50, and the restoration of the ship-list line (#1930(b)).
 - **W1–W4 are untouched.**
+
+### F.8 Architect rulings — Amendment F round 1
+
+**Verdict: APPROVED_WITH_EDITS.** The edits marked *(architect, round 1)* above are binding. With them
+applied, W5c may go to the coder. **No human ruling is required before coding.** No ADR erratum is
+needed: ADR-1643 is correct as written, and the inconsistency was in this TD (Amendment E). Iteration
+1 of 5. The design converged in this round.
+
+**Verified against the tree (`7d65306e8`, whose only delta over `aac066168` is this document):**
+- **Re-read and holding:** every TD-VF-34/35/36/38 citation:
+  - `dimension_registry_cli.py:33`, `:79`, `:100`, `:105-106`, `:110`;
+  - `run_post_change_sweep.sh:44-56`;
+  - `hos_install.sh:615-640`, `:1287-1288`, `:1905-1917`, `:2105-2122`, `:2205-2234`, `:2272-2281`,
+    `:2408-2418`, `:2428`, `:2500-2501`.
+- **Ship-list:** line 59.
+- **Item-1 paths:** there are 14 (`find contract/dimensions -type f`, minus `project.yaml`).
+- **Slow-marker plumbing:** `pyproject.toml:19` (marker definition), `run_tests_inner_loop.sh:86`
+  (`-m "not slow and not integration"`), and `run_tests_release.sh` (runs everything).
+- **Copy-loop and `contract/` section role guards:** both run under every role; neither sits inside the
+  `! $ROLE_HUMAN` block at `:1988-2103`. So the new block sees the same role set as item 1's copies.
+- **The `exit 4` abort precedes both:** `:1634` comes before `:1905` and `:2122`, so T5.47's
+  drift-blocked case is sound.
+- **One citation corrected:** TD-VF-37's description of L31.
+- **File count:** 12 is right.
+  - No existing test pins the old sweep. The only test hits are a corpus path at
+    `test_dimension_registry_data.py:410` and two docstrings.
+  - The validation stamp hashes `.claude/agents/*.md` only (`check_validation_current.sh:4-7`), and W5c
+    touches no agent file, so no stamp file joins the PR.
+  - The ≤15-file / ≤10-commit limit is `worker.md:191` (`docs/PR-SIZE-POLICY.md`). The split plan
+    (W5c-1 before W5c-2) is the correct fallback, and its ordering argument is right.
+- **`-text`:** TD-VF-39's probe is accepted. `-text` is the correct attribute because L31 hashes raw
+  bytes and `eol=lf` normalises on commit.
+
+**Q1 (BLOCKING) — TD-D50: CONFIRMED. The W5c sweep executes no binding. This is a correction, not a
+structural change, and it needs no human.**
+- **The ADR decides it, and the ADR is BINDING and human-ratified.**
+  - AD-11's title says the script *"survives only as `--explain` over the resolved registry"*. Its body
+    says it is *"rewritten to print a human-readable rendering of the resolved registry's plan"*.
+  - The §5 W5 row says *"reduced to `--explain`"*.
+  - Execution is AD-13's runner, in W6/W7. W7 is blocked on ESC-2, which is a human-gated
+    deployment-topology change.
+  - A W5c sweep that executed bindings would be a second runner, ahead of the human's ESC-2 ruling and
+    in a script AD-10 says must not re-run CI-trusted gates. That would be the structural change. TD-D50
+    is the absence of it.
+- **Where "W5c executes" came from.** That phrase entered through #1932's issue text ("Once W5c wires
+  `run_post_change_sweep.sh` to execute resolved bindings"). That text is worker-authored framing, not a
+  human ruling. My own Amendment E round-1 rulings (§E.2 "W5c obligations", §E.8 "W5c inherits") then
+  carried it forward unchecked. The error is mine to correct.
+  - Every human statement in the chain (#1930's options, the Q1–Q8 rulings in the ADR) describes the
+    sweep as reading the registry, never as executing it.
+  - Re-homing an obligation that I attached to the wrong slice changes no product behaviour, no cost,
+    no topology, no retention surface and no operational burden. The product-boundary checkpoint is not
+    triggered.
+- **TD-D43's content is unchanged.** Its binding point is corrected to "the first component that
+  executes a deterministic `Binding.tool`". That is AD-13's runner, which first lands in **W6**, not W7
+  (edit above). The judgment-binding analogue is recorded as a forward obligation on W6's TD.
+- **#1932's acceptance line** is satisfied vacuously for W5c. It is in any case already satisfied in
+  substance, because L32's allowlist merged in #1952.
+- **The rejected `--run-deterministic` alternative stays rejected.**
+- **Amendment E's text is not rewritten.** The Amendment F header now names §E.2 and §E.8 in its
+  "governs" clause.
+
+**Q2 — TD-D51: CONFIRMED WITH EDITS.**
+- Discarding git's exit status was safe only while empty meant exit 1, and §C.2.10's TD-D29 removed
+  that. Fail-closed is the only answer consistent with §C.2.10's own narrowing rationale.
+- **Edits:**
+  - (a) The rule is scoped to diff-computing calls. As drafted it would also abort on the two boolean
+    narrowing probes, making every untracked explicit file argument exit 1, which contradicts T5.48's
+    `nosuch.py` case.
+  - (b) An unborn `HEAD` is stated to exit 1.
+  - (c) **`-z`, read NUL-separated with a bash-3.2 loop.** Without it, `core.quotePath` C-quotes
+    non-ASCII and control-character paths, and the registry returns a confident "not applicable" for a
+    changed file. That is the exact false answer this amendment exists to forbid. It is a second
+    narrowing of "byte-for-byte today's": the git command changes by one flag, and the mapping from
+    input form to command is otherwise identical.
+- Pinned by new T5.48 rows and T5.67 cases.
+
+**Q3 — TD-D55: CONFIRMED WITH EDITS. Not structural, and not a pre-coding human escalation.**
+- `-text` over `eol=lf` and the `contract/dimensions/**` scope are both right, for the reasons given.
+  Appended lines are last in the file, so they override any earlier consumer `* text=auto` line for
+  these paths.
+- **Edits:**
+  - (a) **The whole-line match is opt-in (`exact`), not global.** The drafted global `-qxF` change
+    falsely claimed "output unchanged". It would append duplicate-intent lines to existing consumers'
+    `.gitignore` on upgrade.
+  - (b) **A missing-final-newline guard for all callers.** The current append corrupts the consumer's
+    last line in that case.
+- **On the product boundary.** Writing into a consumer-owned file is a consumer-visible change, so I
+  considered routing it.
+  - **Why it does not need pre-coding clearance:**
+    - it touches only HOS-owned paths;
+    - it is additive and idempotent;
+    - it follows the installer's existing `.gitignore` precedent;
+    - #1951 recommended it;
+    - it lands only through a `bootstrap/**` PR that CODEOWNERS already human-gates.
+  - **The condition:** the PR body presents it as a separately strikeable decision with a named
+    fallback (edit in §F.4). The CODEOWNERS approval of that PR is the human clearance, and the approver
+    can strike it without reopening this design.
+
+**Q4 — TD-D58: CONFIRMED as drafted (slow, release-only, with `-m slow` output in the PR body).**
+- The repository's convention and the marker's own definition (>5 s, real filesystem or subprocess)
+  put a real install in `slow`. Breaking that for one ~5 s case sets a precedent the inner loop pays for
+  on every PR.
+- The cost of release-only coverage is bounded today, because nothing consumes the registry before W7.
+- **Forward obligation on W7's TD:** when W7 makes L31 consumer-load-bearing and restores the sweep to
+  the ship-list, it must un-mark one consolidated real-install `load(target)`-green case so that the
+  inner loop guards it on every installer PR.
+
+**Q5 — doc edits in W5c's scope: CONFIRMED.**
+- `docs/CUSTOMIZATION.md:387` and `docs/SETUP.md:232` currently instruct consumers to run a script
+  #1930(b) stops shipping. Leaving them unchanged would ship a broken instruction, so they must change
+  in the same PR as the ship-list line.
+- `docs/AGENTS.md` is a protected surface (`protected_surfaces.txt:21`). Its two rows change wording
+  only. The agent's dispatch instructions (ESC-K) stay with W7.
+
+**Other rulings (round 1):**
+- **TD-D53 capture rule.** The CLI's output is captured and its exit checked before rendering, never
+  piped live under `pipefail`. Otherwise the TD-D52 exit table cannot be applied, and a renderer
+  traceback contaminates the one-line diagnostic. Pinned by the new T5.68 case.
+- **T5.65 is strengthened to every allowlisted tool.** A one-tool sentinel does not prove
+  non-execution.
+- **T5.67 sets `GIT_CEILING_DIRECTORIES`.** Without it, the no-git case depends on where pytest places
+  `tmp_path`.
+- **T5.68 pins `project_text=None`.** The 17/23 totals assume no project layer.
+- **T5.48's empty-set `--json` row asserts the bare `[]\n`.** That is §C.2.10's approved shape, and a
+  `changed_files` key does not exist in that case.
+- **TD-D54 steps 1a, 1b, 2 and 3, the manifest concatenation point, and TD-D56/TD-D57 are approved as
+  drafted.**
+  - Every `rm -f` target is confined to `contract/dimensions/pack-*.yaml`, with an R2b-validated slug
+    on the 1b path.
+  - Step 2 removes before the manifest is rebuilt, so a pruned file is never reported as an orphan.
+  - `_generated_whole_rows` must be declared `=()` before the block, because of `set -u` on bash 3.2.
+- **Review set** as in §F.4. `security-reviewer`'s brief additionally covers the `ensure_line` change:
+  `exact` scoping and the newline guard.
+
+**Human escalations: none.**
+- #1930 is ruled.
+- #1947 (ARCH-ESC-E1/E2) gates W7, not W5c.
+- TD-D50 conforms the TD to the human-ratified ADR and does not depart from it.
+- The `.gitattributes` write is cleared at the CODEOWNERS gate under the condition above.
+
+**Startup-gap and sign-off analysis.** I agree with §F.7.
+- TD-VF-35, TD-VF-37 and TD-VF-38 are a `startup-artifact-gap`. So is the `core.quotePath` defect found
+  this round, which was present when §C.2.10 was written. The orchestrating session should annotate the
+  §C.3 issue accordingly.
+- TD-VF-33 is my own round-1 error in Amendment E (§E.2, §E.8). It was caught before any W5c code
+  existed, so it orphans no approval.
+- W5a, W5b and the hardening slice stand, because none of their behaviour depends on which slice
+  executes bindings.
+- W6's and W7's TDs, both unwritten, inherit the forward obligations recorded in TD-D50 and in Q4
+  above.
 
 ---
 
