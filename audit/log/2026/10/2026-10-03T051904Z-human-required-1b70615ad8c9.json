@@ -1,0 +1,1 @@
+{"decision":"HUMAN_REQUIRED","event":"human-required","head_sha":"c5322b17148399f95d87f147eac68f5f49882ddc","pr":1955,"reason_category":"GATE_UNSATISFIED","review_id":5399142635,"summary":"NG3b release-title classifier matched ship-list (false positive); server-side gate undetected (PROPOSE_ONLY)","tier":"HIGH"}
