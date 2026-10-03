@@ -115,6 +115,38 @@ def test_installer_reads_list_on_both_sides():
     )
 
 
+_ITEM1_DIMENSION_PATHS = (
+    [
+        "contract/dimensions/core.yaml",
+        "contract/dimensions/project.yaml.template",
+    ]
+    + [
+        f"contract/dimensions/postures/review-read-only{v}.{k}.json"
+        for v in ("", "-gh-read")
+        for k in ("settings", "hos")
+    ]
+    + [
+        f"contract/dimensions/prompts/{n}.md"
+        for n in ("code-review", "security", "privacy", "reliability", "ops", "ui", "a11y", "infra")
+    ]
+)
+
+
+def test_ship_list_holds_registry_data_and_withholds_generated_and_sweep():
+    """#1643 W5c T5.47 (static half): item-1 registry data ships; project.yaml,
+    resolved-packs.txt and (until W7, #1930 option (b)) the sweep do not."""
+    listed = set(_consumer_files())
+    assert len(_ITEM1_DIMENSION_PATHS) == 14
+    missing = [p for p in _ITEM1_DIMENSION_PATHS if p not in listed]
+    assert not missing, f"ship-list lacks item-1 registry paths: {missing}"
+    for withheld in (
+        "contract/dimensions/project.yaml",
+        "contract/resolved-packs.txt",
+        "scripts/framework/run_post_change_sweep.sh",
+    ):
+        assert withheld not in listed, f"{withheld} must not be on the ship-list"
+
+
 def test_usage_pause_files_shipped():
     """#1944: the poller and its library ship to consumer installs."""
     files = set(_consumer_files())

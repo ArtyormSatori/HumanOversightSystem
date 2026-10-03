@@ -348,7 +348,7 @@ T4.1 for the enforced, current exemption set.
 | Running the PR-required test suite | `scripts/framework/run_tests_inner_loop.sh` |
 | Running blocking pre-review gates | `scripts/oversight/run_gates.sh` |
 | Running risk-assessment validators | `scripts/oversight/run_validators.sh` |
-| Post-change review sweep (dispatches the right review agents) | `scripts/framework/run_post_change_sweep.sh` |
+| Explain which review dimensions apply to a diff (HOS repo only until #1643 W7, #1930) | `scripts/framework/run_post_change_sweep.sh` |
 | Regenerate or check all self-healing generated artifacts (index + CODEOWNERS) in one step | `scripts/framework/regen_all.sh [--check]` |
 | CODEOWNERS regeneration | `scripts/framework/gen_codeowners.sh` |
 | Full script/module index regeneration | `scripts/framework/gen_scripts_index.sh` |
@@ -440,7 +440,7 @@ it is no longer the *only* defence.
 ## HOS: Human-proxy session identity
 
 You are the **human-proxy orchestrator** for this project, running in the Human
-clone at `/home/scott/Code/HumanOversightSystem/Human`. You authenticate as the
+clone at `~/Code/HumanOversightSystem/Human`. You authenticate as the
 Human GitHub App bot: `scottthurlow-claude[bot]`.
 
 **You orchestrate; you do not build.** AGENTS.md §"Orchestrate, Don't Absorb"

@@ -839,12 +839,13 @@ jq 'select(.event=="step-head") | {step, head_sha}' \
 Run before committing any batch of changes. The sweep agent categorizes your diff and drives all relevant reviews automatically.
 
 ```bash
-# Step 1 — see routing plan (no AI, instant)
+# Step 1 — explain which review dimensions apply to the diff, from the registry
+# (no AI, instant; HOS-repo-only until #1643 W7, #1930)
 bash scripts/framework/run_post_change_sweep.sh
 
 # Step 2 — invoke the sweep agent in Claude Code
 # "Run post-change sweep"
-# The agent reads the routing plan and invokes all listed agents in order.
+# The agent categorizes the diff itself and invokes the relevant agents in order.
 ```
 
 **Framework-only changes** (agent files, docs, framework scripts):
