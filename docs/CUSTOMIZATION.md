@@ -384,7 +384,7 @@ bash scripts/framework/run_framework_validation.sh
 
 | When | Command |
 |---|---|
-| Before committing any change | `bash scripts/framework/run_post_change_sweep.sh` then invoke `post-change-sweep` agent |
+| Before committing any change | Invoke the `post-change-sweep` agent (`scripts/framework/run_post_change_sweep.sh` explains which review dimensions apply to a diff, from the registry; HOS-repo-only until #1643 W7, #1930) |
 | Before committing agent/doc changes | `bash scripts/framework/run_framework_validation.sh` |
 | Quick structural check only | `bash scripts/framework/run_framework_validation.sh --static-only` |
 | After installing in a new repo | Invoke `framework-setup-validator` agent |

@@ -119,7 +119,7 @@ excluded.
 - `scripts/framework/require_tier_ceiling.py` — server-side overseer ceiling gate.
 - `scripts/framework/rerun_gate_checks.py` — review-triggered re-evaluation of the server-side gates.
 - `scripts/framework/run_framework_validation.sh` — run the full framework validation suite.
-- `scripts/framework/run_post_change_sweep.sh` — shell entrypoint for the post-change sweep.
+- `scripts/framework/run_post_change_sweep.sh` — explain which review dimensions apply to a diff (ADR-1643 AD-11).
 - `scripts/framework/run_tests.sh` — run unit tests and optionally mutation tests for HOS validators.
 - `scripts/framework/run_tests_inner_loop.sh` — Run the inner-loop test suite (required for PR approval).
 - `scripts/framework/run_tests_release.sh` — Run the full test suite (required for release).

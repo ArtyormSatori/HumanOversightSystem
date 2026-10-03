@@ -228,10 +228,8 @@ Fix any blocking findings before committing.
 After any change to agent files, pipeline docs, or application code:
 
 ```bash
-# See what needs reviewing:
-bash scripts/framework/run_post_change_sweep.sh
-
-# Then in Claude Code:
+# Then in Claude Code (in the HOS repo, `scripts/framework/run_post_change_sweep.sh`
+# explains which review dimensions apply to a diff; HOS-repo-only until #1643 W7, #1930):
 # "Run post-change sweep"
 ```
 
@@ -274,8 +272,7 @@ your-project/
 │       ├── config.sh            ← generated; your project-specific values
 │       ├── check_agents_static.sh
 │       ├── validate_agents.sh
-│       ├── run_framework_validation.sh
-│       └── run_post_change_sweep.sh
+│       └── run_framework_validation.sh
 └── audit/
     └── oversight-log.jsonl      ← append-only audit trail
 ```
