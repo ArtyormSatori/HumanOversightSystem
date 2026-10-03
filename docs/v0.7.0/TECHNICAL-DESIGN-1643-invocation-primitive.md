@@ -57,7 +57,9 @@ below is designed to be implementable without further design questions.
 
 > **AMENDED 2026-10-03 — Amendment F (W5c: the explain-only sweep, the installer's registry-data step, the ship-list, #1930(b), #1951). Architect-approved with edits, round 1 (§F.8). Binding on W5c.** Places TD-D43 (i)–(iii) on AD-13's runner, the first component that executes a deterministic `Binding.tool`, not on the W5c sweep (TD-D50). Where it and §7.7/§7.9, §C.2.10/§C.2.11, §E.2 (TD-D43's "W5c obligations" label) or §E.8 ("W5c inherits") disagree, Amendment F governs. *(architect, round 1)*
 
-**Date:** 2026-09-14 (original), amended 2026-09-16 (Amendment A), 2026-09-18 (Amendment B), 2026-10-02 (Amendments C, D), 2026-10-03 (Amendments E, F)
+> **AMENDED 2026-10-03 — Amendment G (W6: the observation-only measurement slice). Architect-approved with edits, round 1 (§G.12). Binding on W6; the code slice may go to the coder. ESC-G1 (human) gates the measurement campaign, not the code.** *(architect, round 1)* Designs the "Out of scope" line's W6. W6 lands AD-13's runner as L2 only (`scripts/automation/dimension_sweep_cli.py`, `measure` + `report`) over exactly one binding, `core:code-review/code`. A human runs it from their own terminal; it is never run from `bin/hos-cron` or from a model session. It writes durable `audit/log/` records and gates nothing. W6 executes no deterministic `Binding.tool`, so TD-D43 (i)–(iii) pass to W7 unchanged (TD-D61). W6 is the first component to render a prompt template, so it takes TD-D35 (a)/(b)/(c1)/(c2) (TD-D62). One human escalation, ESC-G1, covers the measurement campaign. Where it and §1.2's W6/W7 rows or TD-D35's "W7 obligations" label disagree, Amendment G governs.
+
+**Date:** 2026-09-14 (original), amended 2026-09-16 (Amendment A), 2026-09-18 (Amendment B), 2026-10-02 (Amendments C, D), 2026-10-03 (Amendments E, F, G)
 **Iteration:** 1 of 5
 **Author:** technical-design
 **Binding inputs:** `docs/v0.7.0/ADR-1643-deterministic-agent-invocation.md` (AD-1…AD-16 BINDING);
@@ -5816,3 +5818,983 @@ constrained to editing this one file.
   only.
 - No issue was filed, no label was created, no comment was posted, and nothing was committed.
 - No register entry was written.
+
+---
+
+## Amendment G (2026-10-03) — W6: the observation-only measurement slice (AD-13 runner, one judgment entry)
+
+**Status:** **DRAFT. Amendment G round 1 of 5. Architect review is requested. Do not hand it to the
+coder until the architect approves.** One human escalation (ESC-G1, §G.8) blocks the measurement
+*campaign*. It does not block the code. ADR-1643 §5 row W6 is binding: *"AD-13 runner, **one** judgment
+entry, **observation only** — records durations and outcomes, gates nothing. **Do not skip for speed.**"*
+Where this amendment and §1.2's W6/W7 rows, or TD-D35's "W7 obligations" label, disagree, Amendment G
+governs. Everything else stands.
+
+**Numbering.** TD-VF-41…TD-VF-49, TD-D59…TD-D65, tests T6.01…T6.29 *(architect, round 1: T6.29 added)*, escalation ESC-G1, and
+architect questions TD-G-O1…TD-G-O7. ESC-G1 is unrelated to the ADR's historical **ESC-G** (the
+protection asymmetry, ADR §9.6); the `<n>` suffix keeps the two apart.
+
+### G.1 Verification findings — TD-VF-41…TD-VF-49 (tree at `09f62a9c0`)
+
+**TD-VF-41 — W1 already produces every per-invocation number W6 needs. W6 reads the W1 document and
+does not re-derive anything.**
+- `bootstrap/invoke_agent.sh` passes through `agent_invoke_cli.py` (`:105`). Exit 0 means a document was
+  produced, whatever it says. Exit 1 is an operational failure with no document. Exit 2 is a usage
+  error (`invoke_agent.sh:53-61`).
+- The `invocation` block carries `duration_ms`, `timeout_seconds`, `timed_out`, `exit_code`, `model`,
+  `model_source`, `cli_version`, `num_turns`, `usage`, `model_usage`, `total_cost_usd` and
+  `envelope_unknown_fields` (`agent_invoke_cli.py:1416-1460`).
+- `terminal_reason_missing` is a classifier `outcome_detail` (`:639`). The other details are `timeout`,
+  `unparseable`, `envelope_shape_violation`, `crash`, `permission_denied`, `refused`, `schema_violation`
+  and `usage_limit` (`:581-712`).
+- `compute_input_digest` is public and pure (`:740-774`). The matched-files component comes from
+  `_matched_files_digest` (`:722-737`), which is **private**. `binding_sha256` is hard-coded `None`
+  (`:767`; TD §4.4: "W7 fills this").
+- The flags W6 needs already exist (`:1212-1230`): `--dimension`, `--binding`, `--lens`, `--timeout`,
+  `--step`, `--head-sha`, `--base-sha`, `--matched-file`, `--prompt-template-version`, `--not-applicable`
+  and `--require-env-auth`. The primitive's timeout bounds are 30…1800 s (`:169-170`).
+
+**TD-VF-42 — GAP (W3): the per-invocation audit record does not carry `envelope_unknown_fields`.**
+- ADR §9.7 requires §5.2's record to *"add `envelope_unknown_fields` and `cli_version`"* (W3).
+  `cli_version` is present (`agent_invoke_cli.py:1086`). `envelope_unknown_fields` is not in the event
+  dict at `:1071-1094`, and TD §5.2 was never corrected to require it.
+- W6 is not blocked, because it reads the field from the document (TD-VF-41). The gap is routed in
+  §G.9. W6 does not fix it, because that would re-open W3's audit schema inside a measurement slice.
+
+**TD-VF-43 — no real `claude --agent` invocation has ever been recorded here, and the
+`agent-invocation` event stream is polluted by tests.**
+- This clone holds **6,958** `agent-invocation` records under `audit/log/2026/{09,10}/`. **None** is
+  tracked by git. All 6,958 match three test signatures:
+  - 2,958 × `code-reviewer`/`ad-hoc`/`not_applicable`;
+  - 2,000 × `no-such-agent-xyz`/`agent_unavailable`;
+  - 2,000 × `code-reviewer`/`security`/`not_applicable`.
+- **Zero** records have `duration_ms > 0` and a non-null `cli_version`.
+- **Source:** `tests/automation/test_agent_invoke_wrapper.py` runs the real L3 with `cwd=REPO_ROOT`
+  (`:35`, `:44-47`; e.g. `:84`), and L3 resolves its root from its own location. So every test run
+  writes W3 records into the real `audit/log/`.
+- **Consequences for W6:**
+  - (a) ADR §3's "unknown — never run" still holds at `09f62a9c0`. W6 is still the only possible source
+    of the number.
+  - (b) No W6 aggregate may be computed over `agent-invocation` events. W6 writes and reads its own
+    event names (TD-D63).
+  - (c) W6's own tests must never write into the real tree (T6.22).
+- The pollution is routed in §G.9.
+
+**TD-VF-44 — `token_tracker.py` is not a durable record and cannot be W6's source.**
+- It appends to `.claudetmp/oversight/token-usage.jsonl` (`token_tracker.py:42`). That path is gitignored
+  and local to one clone, which is exactly VF-5's non-durable class.
+- W3 calls it for awareness only (§5.1). W6 neither calls it nor reads it. Each launched W1 invocation
+  still calls it once, unchanged.
+
+**TD-VF-45 — the W5 engine provides everything W6 needs, in process.**
+- `dr.load(root)` with no `packs` runs L31's resolved-packs check (TD-D43 (iv); `dimension_registry.py:1004`).
+- `dr.resolve_for_diff(reg, changed)` is the only producer of applicability (`:1009-1045`). It raises
+  PL1 `bad_changed_file` before matching.
+- `Binding` carries `agent`, `posture`, `timeout_seconds`, `prompt_template` and `predicate`
+  (`:458-470`). `ResolvedRegistry.digest` covers all of them (`:966-1001`).
+- **HOS's resolved registry has two `code-review` bindings:**
+  - `core:code-review/code` (`core.yaml`): agent `code-reviewer`, posture `review-read-only`, 300 s,
+    `prompts/code-review.md`, include `\.py$ \.sh$ \.js$ \.ts$ \.jq$`, exclude tests and `.venv`;
+  - `project:code-review/framework-validator` (`project.yaml`).
+- `contract/resolved-packs.txt` is empty in HOS (TD-D27), so no pack binding exists.
+
+**TD-VF-46 — `dimension_registry_cli.py plan --base` has the `core.quotePath` defect that TD-D51(c)
+fixed only in the sweep.**
+- `_git_changed_files` runs `git diff --name-only <base>...HEAD` without `-z` (`dimension_registry_cli.py:65-80`).
+- A non-ASCII or control-character path is therefore C-quoted, and no predicate matches it. That is the
+  confident "not applicable" which Amendment F's Q2(c) ruling forbids.
+- W6 does not call `plan`, and it computes its own changed set with `-z` (TD-D60). The CLI defect is
+  routed in §G.9.
+
+**TD-VF-47 — AD-13's runner does not exist yet. One of its two named files is a protected surface.**
+- Neither `scripts/automation/dimension_sweep_cli.py` nor `bootstrap/run_dimensions.sh` exists.
+- `bootstrap/**` is in `protected_surfaces.txt`. `scripts/automation/**` is not.
+- Nothing ships either file. ESC-E's binding constraint stands: the coder must not relocate
+  `dimension_sweep_cli.py` to make it ship (ADR §9.6).
+
+**TD-VF-48 — the nested-session and cron-cycle signals exist, and one precedent already uses an
+environment signal only to refuse.**
+- **Probed in this session (Claude Code 2.1.288):** a Bash-tool subprocess inherits `CLAUDECODE` (set,
+  along with `CLAUDE_CODE_ENTRYPOINT` and others). No HOS script reads any of them today (repo-wide grep).
+- `validate_self.sh:114-160` uses `HOS_CYCLE_ROLE` for one thing only: a veto that makes a run
+  **stricter**, refusing `--allow-keychain-auth` inside a cron cycle. That rule is AD-16.7, pinned by
+  `test_agent_invocation_migration.py:346`.
+- **AD-16.7's principle:** an environment signal may refuse a run. It may never relax one.
+
+**TD-VF-49 — PREDICTION, unprobed: the chosen reviewer will probably fail under its own posture.**
+- `code-reviewer.md` instructs the agent to write a register entry to `.claudetmp/signoffs/…`
+  (`:113`, `:135`) and loop temp-state to `.claudetmp/reviews/…` (`:103`).
+- `review-read-only` denies `Write` and `Edit` (the `review-read-only.settings.json` deny list), and
+  TD-D33 rule 5 forbids the prompt from overriding the agent definition.
+- An attempted write that is denied shows up in `permission_denials`, and the classifier maps that to
+  `invocation_failed`/`permission_denied` (`agent_invoke_cli.py:668`). A prose response in place of one
+  JSON object maps to `schema_violation`.
+- All eight lens agents share this shape. **No live run has tested the prediction. W6 is that test.**
+  A systematic failure here would be a W7 blocker, and it is raised now as TD-G-O4 so that nobody first
+  learns it from W8.
+
+*Re-confirmed:* `scripts/oversight/lib/audit_log.write_event` is write-once with exclusive create
+(`audit_log.py:126-157`). It does not fsync, so a record survives the process being killed but not a
+power loss. `read_stream` yields every record in path order, and it raises on invalid JSON
+(`:160-188`). Nothing in `bin/`, `bootstrap/` or `scripts/` commits `audit/log/` records
+automatically; the repo-wide grep finds only the installer's `git add` hint. Records become auditable
+when someone commits them (TD-D63).
+
+### G.2 Scope
+
+**Delivers:**
+- `scripts/automation/dimension_sweep_cli.py`: AD-13's runner as **L2 only**, with exactly two
+  subcommands. `measure` runs one observation of one binding against the current checkout. `report`
+  aggregates the observations.
+- Three public aliases in `agent_invoke_cli.py` (TD-D64).
+- Tests T6.01…T6.29, all in the inner loop.
+- The `SCRIPTS-INDEX.md` regeneration that a new `scripts/automation/*.py` requires
+  (`tests/framework/test_scripts_index.py`).
+
+**Does not deliver:**
+- Any `bin/hos-cron` edit or stage, or any cron, systemd or workflow wiring (ESC-2 is unanswered).
+- Any PR comment, `envelope.py` post, or other AD-14 storage.
+- Any read by `decide_merge_authority()`, the bounce path, the overseer's verdict or a required check.
+- `bootstrap/run_dimensions.sh` (L3). This is deferred to W7 (TD-D59).
+- Any second binding or entry, a `--binding` flag, a sweep loop or a per-cycle budget.
+- Execution of any deterministic `Binding.tool`.
+- Any change to the registry data, the postures, the prompts, any agent file, W3's audit schema, or
+  `dimension_registry_cli.py`.
+- Any per-cycle budget number. W7 calibrates from W6's output (ADR §3), and W6 does not calibrate.
+
+### G.3 Decisions — TD-D59…TD-D65
+
+**TD-D59 — W6 is AD-13's runner, at AD-13's L2 name, with no L3 yet.**
+- **Lands:** `scripts/automation/dimension_sweep_cli.py`, the name AD-13 binds, with the subcommands
+  `measure` and `report` and no others. W7 adds the sweep subcommand to the same module.
+- **Deferred to W7:** `bootstrap/run_dimensions.sh`.
+  - **Reason:** L3 exists to give non-interactive callers a statically allowlistable argv (AD-1).
+    W6 refuses every non-interactive and in-session caller (TD-D60), so in W6 an L3 has no legitimate
+    consumer.
+  - Shipping it now would publish exactly the allowlistable entry point that an agent session would
+    use to nest a model session.
+  - It would also be the third copy of the interpreter ladder (`invoke_agent.sh`,
+    `run_post_change_sweep.sh`) and a protected-surface file, which is cost with no W6 benefit.
+- **The human invokes L2 with the venv interpreter:**
+  `scripts/oversight/.venv/bin/python scripts/automation/dimension_sweep_cli.py measure --base origin/main`.
+  If PyYAML is missing, that surfaces as the loader's `yaml_unavailable` and is recorded (§G.6). It is
+  never a traceback.
+- **The binding is a module constant:** `MEASURED_BINDING = "core:code-review/code"`. There is no
+  `--binding` flag. Widening W6 is therefore a code change under review, not a flag (T6.25).
+
+**TD-D60 — who runs it, and when: a human, in their own terminal, by hand. Never cron, and never a model
+session.**
+- **Why this is the only invoker the constraints allow:**
+  - ESC-2 is unanswered, so no `hos-cron` stage is possible.
+  - Q4+Q6 rule out nested sessions, so the worker, the overseer and the human-proxy session are all
+    excluded, because each is a `claude` session whose Bash tool would be the parent of the agent W6
+    launches.
+  - What remains is a human at a shell.
+- **Refusals.** Both fire before any I/O, exit 2, write one stderr line, and write **no** record. They are
+  one-direction refusals in the AD-16.7 sense (TD-VF-48):
+  - `HOS_CYCLE_ROLE` is set and non-empty: *"dimension_sweep: refused: HOS_CYCLE_ROLE is set — W6 is
+    never run from a cron cycle (ADR-1643 ESC-2)"*.
+  - `CLAUDECODE` is set and non-empty: *"dimension_sweep: refused: running inside a Claude Code session
+    — W6 must be run from a plain terminal (ADR-1643 Q4+Q6, no nested sessions)"*.
+  - *(architect, round 1)* The same refusal, with the variable named in the message, fires when
+    `CLAUDE_CODE_ENTRYPOINT` is set and non-empty. Either variable suffices. Two independent vendor names
+    make a silent rename of one of them a non-event, which is the cheap half of TD-G-O3's residual.
+  - Unsetting a variable to evade a refusal is a deliberate act against a named rule, and the review of
+    any committed caller would catch it. The refusals are a guard against accident, not a security
+    boundary. **TD-G-O3.**
+- **Auth follows AD-16.7 exactly.** `--require-env-auth` is passed by default. `--allow-keychain-auth`
+  omits it, for a human using keychain auth. No environment signal relaxes it.
+- **The checkout is the input.**
+  - `head_sha` = `git rev-parse HEAD`.
+  - `base_sha` = `git merge-base <base> HEAD`.
+  - The changed set = `git diff -z --name-only <base>...HEAD`, read as NUL-separated. That is
+    Amendment F's Q2(c) rule (TD-VF-46).
+  - The size covariate = `git diff -z --numstat <base>...HEAD`, summed over the matched files. A binary
+    file's `-` counts as 0.
+  - The tracked tree must be clean (`git status --porcelain --untracked-files=no` is empty), so that
+    the matched-file bytes the primitive hashes are HEAD's bytes. Untracked files, including
+    `audit/log/` records, are allowed.
+  - `<base>` must resolve via `git rev-parse --verify <base>^{commit}`. A value beginning with `-` is a
+    usage error.
+- **Concurrency is 1 by construction.** One `measure` process launches at most one invocation. Two
+  concurrent `measure` processes in one clone are refused through a non-blocking `fcntl.flock` on
+  ~~`$(git rev-parse --git-path hos-w6-measure.lock)`~~ `<git rev-parse --git-common-dir>/hos-w6-measure.lock`
+  (resolved to an absolute path). That location is per-repository, and it is never `.claudetmp/`.
+  - *(architect, round 1 — corrected.)* `--git-path <name>` for a name outside git's shared-path list
+    resolves to the **per-worktree** git dir, so two linked worktrees of one clone would each get their
+    own lock and run concurrently. ESC-G1's procedure runs from a linked worktree, so that is the case
+    that matters. `--git-common-dir` is shared by every worktree of the repository, which is what AD-13's
+    concurrency 1 (a quota-burn bound, not a per-directory bound) requires. T6.28 adds a two-worktree
+    case.
+
+**TD-D61 — W6 executes no deterministic binding. TD-D43 (i)–(iii) bind W7, unchanged.**
+- **The only subprocesses `measure` may start:**
+  - `git`;
+  - `["bash", "<root>/bootstrap/invoke_agent.sh", …]` as an argv list with `shell=False`.
+- It never executes, sources or passes on a `Binding.tool` (T6.27). Under TD-D50's rule ("whichever of
+  W6 and W7 first executes a deterministic `Binding.tool`"), (i)–(iii) therefore pass to W7 verbatim.
+- **The judgment-binding analogue binds W6, per the architect's round-1 forward obligation (§F.2):**
+  - **(i′)** `measure` calls `dr.load(root)` in its own process, with `packs=None`, so the TD-D43 (iv)
+    analogue holds and L31 runs. It takes the binding from that `ResolvedRegistry`. The agent,
+    posture, `timeout_seconds`, `prompt_template` and predicate all come **only** from that `Binding`
+    object, never from a literal, a flag or the environment. A missing or suppressed
+    `MEASURED_BINDING` is the `binding_absent` record (§G.6). It never falls back.
+  - **(ii′)** The agent is reached only through `bootstrap/invoke_agent.sh`, as an argv list
+    (AD-16; T6.02).
+  - **(iii′)** `--prompt-template-version` is TD-D34's `sha256:<hex>` over the template file's bytes as
+    read once from disk, and the render uses those same bytes (TD-D62).
+  - The record carries `registry_digest` (`ResolvedRegistry.digest`), so each observation names the
+    exact registry it ran under.
+
+**TD-D62 — W6 is the first renderer, so TD-D35 (a), (b), (c1) and (c2) bind W6. W7 inherits the render.**
+TD-D35 assigned the render to W7 on the assumption that W7 rendered first. W6 invokes first. Without
+these rules the primitive cannot be called at all, so the obligations move to the first component that
+renders. Their content is unchanged; this follows TD-D50's precedent.
+- **(a) How the template reaches the agent.** The rendered bytes are written to a private temp file
+  (`tempfile.mkstemp`, mode 0600, deleted in `finally`) and passed as `--input-file`. That is the only
+  instruction channel (c1).
+- **The input file is the concatenation of three parts, in order:**
+  1. the template file's bytes, verbatim;
+  2. the change block, rendered from this exact text (LF, final newline), with one `- <path>` line per
+     matched file in sorted order:
+     ```
+     
+     ## Changes under review
+     
+     Base commit: <base_sha>
+     Head commit: <head_sha>
+     Inspect each selected file's change with: git diff <base_sha>...<head_sha> -- <path>
+     
+     Selected files:
+     - <path>
+     ```
+  3. the payload block (b), a single module constant `PAYLOAD_INSTRUCTION` in `dimension_sweep_cli.py`.
+     It is the only copy, never one per dimension. It states:
+     - respond with exactly one JSON object and nothing else;
+     - `verdict` ∈ {`approve`, `request_changes`};
+     - `findings` is a list;
+     - each finding has `severity` ∈ the list rendered from `agent_invoke_cli.SEVERITIES` (imported,
+       never copied), `file`, `line`, `category` and `description`;
+     - `summary` is a string;
+     - the keys `applicability`, `outcome`, `input` and `invocation` must not appear.
+     
+     That is §4.3's contract, expressed as an instruction. `error` is deliberately not offered to the
+     agent; it remains reachable only through L2.
+- **(c2) Determinism.** The output must be byte-identical for identical (template bytes, base, head,
+  matched set). It contains no timestamp, run id, absolute path, hostname or environment value
+  (T6.05). A non-deterministic render would quietly break the reuse key, and T6.19 would catch it.
+- **W7 inherits this render as its baseline.** Any change to parts 2 or 3 changes every
+  `input_digest`, so it needs a TD amendment.
+
+**TD-D63 — where the numbers land: write-once `audit/log/` records, then a commit and an issue
+comment. Never a PR comment.**
+- **Two event names, owned by W6.** `report` reads only these; it never reads `agent-invocation`
+  (TD-VF-43).
+  - `dimension-measurement-start` is written **before** launch, after every precondition has passed.
+  - `dimension-measurement` is written once per `measure` run, whatever happened.
+  - A start record with no matching result is an `abandoned` run, for example one killed by SIGKILL.
+    A killed run therefore loses at most its own result and is still counted (AD-13's "lose at most
+    one invocation").
+- Both events go through `audit_log.write_event(event, root=<repo root>)`, loaded by path in the same
+  way as `cycle_log.py:_load_audit_log`. There is no new writer.
+- **Why `audit/log/` and not `.claudetmp/`:** VF-5. The records are write-once files in the committed
+  audit tree, durable against the process dying the moment `write_event` returns. They are cross-clone
+  auditable once committed.
+- **Why not AD-14's PR comment under the overseer identity:**
+  - AD-14's trust rule is that *a record authored by the overseer App identity is a record*. W8's
+    verifying constructor will count exactly those records.
+  - An observation-only W6 record posted under that identity would be indistinguishable to W8 from a
+    gating result. W6 would be manufacturing the forgery surface AD-14 exists to close.
+  - W6 is run by a human, so it would also need a human to mint an overseer token, which is the wrong
+    identity for the actor.
+  - AD-14's storage design, including comment volume, stays W7's.
+- **The durable, auditable path** (the operator procedure in the module docstring):
+  1. After the campaign, the human commits exactly the `audit/log/**/*-dimension-measurement*.json`
+     files on a branch and opens a PR. These are data only and touch no protected surface.
+  2. `report`'s JSON is posted to #1643 through `bootstrap/post_comment.sh --body-file` by whoever
+     carries ESC-1. That is the existing entry point.
+  3. The committed records are the audit trail. The comment is the pointer.
+- **No prose in any record.** No prompt text, agent output, `summary`, finding text, envelope `result`
+  or file content (§5.2's constraint 3; T6.22).
+  - `--document-out <path>` optionally writes the full W1 document for the human's diagnosis. It is
+    never read by `report`, never committed by the procedure, and is not a measurement.
+  - *(architect, round 1)* **`--document-out` must resolve outside the repository work tree.** A
+    path that resolves (after `Path.resolve()`) to the repo root or below it is a usage error: exit 2, one
+    stderr line, no record, before any I/O. The full document carries `invocation.envelope.result`
+    (agent prose, possibly quoting file content), so a document written inside the tree is one
+    `git add -A` away from putting review prose into the committed tree, against §5.2's constraint 3.
+    Pinned by a T6.22 case.
+- *(architect, round 1)* **A measurement is never a dimension result.** The `dimension-measurement` and
+  `dimension-measurement-start` events are not AD-14 records, and no later slice may read them as such.
+  W7's result reader and W8's verifying constructor read AD-14 PR comments only, and they must not fall
+  back to, merge in, or seed reuse from these events. Reuse across the W6/W7 boundary is not offered:
+  W7's first sweep of a head launches. The same event-name scoping that protects `report` from
+  `agent-invocation` noise (TD-VF-43) protects W7 and W8 from W6. This is a forward obligation on W7's
+  and W8's TDs.
+
+**TD-D64 — W6's reuse key is the primitive's own `input_digest`, computed before launch and checked
+after it.**
+- **Computed before launch with W1's own functions:**
+  - `compute_input_digest(...)`, which is public;
+  - `matched_files_digest(...)`, the public alias TD-D64 adds;
+  - `posture.load_posture(...).sha256`;
+  - sha256 of `.claude/agents/<agent>.md`;
+  - sha256 of the rendered input bytes;
+  - plus `dimension = binding.entry`, `binding = binding.id`, the base and head SHAs, and
+    `prompt_template_version`.
+- **The aliases:** `agent_invoke_cli.py` gains three module-level alias lines:
+  `matched_files_digest = _matched_files_digest`, `bounded_audit_str = _bounded_audit_str` and
+  `bounded_audit_number = _bounded_audit_number`. They are additive, the behaviour is unchanged, and the
+  private names stay.
+  - *(architect, round 1 — added.)* A **fourth** alias, `extract_payload = _extract_payload`, for
+    §G.5's `payload_extractable`. Same rule: an alias, never a copy, because a second strict-payload
+    parser would drift from the classifier's A8 and the diagnostic would stop meaning "A8 would have
+    passed".
+  - **Why aliases and not copies:** a second implementation of the digest would drift, and W7's reuse
+    depends on the runner's key equalling L2's. A second copy of the §5.2 bounding rule would drift the
+    same way.
+- **Reuse (AD-13).** If a `dimension-measurement` record with `runner_outcome ∈ {measured,
+  not_applicable}` and the same `input_digest` already exists, `measure` writes a `reused` record that
+  points to it and launches nothing.
+  - A precondition-failed or no-document record never satisfies reuse.
+  - An `invocation_failed` measured record **does** satisfy it. That is AD-13's "current iff digest
+    matches", reproduced exactly. This tells the human that the same input was already observed.
+  - Repeat measurements need a different head.
+- **The check after launch.** The record carries `input_digest_match`, which is whether the
+  precomputed digest equals the document's `input.input_digest`.
+  - `false` is recorded and counted, never raised. It is W7's reuse key failing.
+  - T6.19 pins `true` against the real L2.
+
+**TD-D65 — `report` outputs raw numbers and makes no decision.**
+- It aggregates the W6 events in `audit/log/` (optionally `--since <YYYY-MM-DD>`) into one JSON object
+  (§G.5).
+- **Percentiles** use nearest-rank (`ceil(p·n)`th smallest), over **launched** runs only. A run counts as
+  launched iff the document's `invocation.exit_code` is non-null or `invocation.timed_out` is true. That
+  excludes the four pre-flight details (TD-D24) and `not_applicable`.
+- It computes no budget, no projection to twelve entries and no recommendation. ADR §3 forbids
+  calibrating from estimates, and the projection is ESC-1's and the architect's.
+- **One stderr line when the count is non-zero.** If `terminal_reason_missing_count > 0`, it prints
+  *"dimension_sweep: terminal_reason_missing observed N/M launched — ADR-1643 §9.2: A4 reverts to
+  tolerating absence; route to architect"*. It changes no code and no classifier. The consequence is an
+  ADR amendment (§G.7, row 1).
+- *(architect, round 1 — the denominator corrected.)* `launched` is **not** the right denominator for
+  §9.2's count. The classifier evaluates A4 only after A1 (timeout), A2 (unparseable) and the A3/A5/A6
+  shape checks (`agent_invoke_cli.py:581-635`); a run that stops at any of those never had
+  `terminal_reason` examined, so counting it as a "zero" overstates the evidence. `report` therefore
+  adds `terminal_reason_evaluated`: launched runs whose `outcome_detail` is **not** `timeout`,
+  `unparseable` or `envelope_shape_violation`. The stderr line's `M` is `terminal_reason_evaluated`.
+  When `terminal_reason_evaluated == 0`, `report` prints instead *"dimension_sweep: terminal_reason
+  evaluated on 0 runs — ADR-1643 §9.2 residual not yet discharged"*. A4 sits ahead of A5, so a
+  `permission_denied` run (TD-VF-49) still evaluates `terminal_reason`; the §9.2 residual is
+  dischargeable even if TD-G-O4's prediction comes true. T6.08 pins all three cases.
+
+### G.4 Files — the code slice is **4 files** (≤ 15; no split)
+
+| # | Path | Change | Protected? |
+|---|---|---|---|
+| 1 | `scripts/automation/dimension_sweep_cli.py` | new — L2 `measure` + `report` (TD-D59…D65) | no |
+| 2 | `scripts/automation/agent_invoke_cli.py` | three alias lines (TD-D64) | no |
+| 3 | `tests/automation/test_dimension_sweep_cli.py` | new — T6.01…T6.29 *(architect, round 1: T6.29 added)* | no |
+| 4 | `SCRIPTS-INDEX.md` | regenerated by `scripts/framework/gen_scripts_index.sh` | no |
+
+- **Untouched:** `bin/**`, `bootstrap/**`, `contract/**`, `.claude/agents/**`, `CLAUDE.md`, the ship-list,
+  and `dimension_registry*.py`.
+- No CLAUDE.md canonical-entry row is added. The tool is human-only and refuses agent sessions, so
+  listing it where every agent session reads would only invite the refused call.
+- The validation stamp hashes agent files only (§F.8), so no stamp joins the PR.
+- With no protected surface touched, CODEOWNERS does not human-gate this PR. The human gate on spend is
+  ESC-G1 and the human's own hand on the keyboard (TD-D60).
+
+### G.5 CLI surface, record schema and exit codes
+
+```
+dimension_sweep_cli.py measure --base <ref> [--allow-keychain-auth] [--document-out <path>]
+dimension_sweep_cli.py report  [--since <YYYY-MM-DD>]
+```
+Unknown flags and a missing subcommand are usage errors. `main(argv, *, repo_root=None)` is a test-only
+root injection, following the idiom of the two sibling CLIs.
+
+**`measure` exit codes.**
+
+| Exit | Meaning | Record? | stdout |
+|---|---|---|---|
+| 0 | An observation was recorded: `measured` (whatever the document's outcome), `not_applicable` or `reused` | result (and start, if launched) | the result record, one JSON object |
+| 1 | A run failure was recorded (§G.6), **or** a record could not be written | yes, if writable | the result record (also on a write failure) |
+| 2 | Usage error or refusal (TD-D60) | **no** | empty |
+
+**The result record** (literal example; a launched run whose prediction from TD-VF-49 came true):
+```json
+{
+  "event": "dimension-measurement",
+  "schema_version": 1,
+  "timestamp": "2026-10-04T14:02:51Z",
+  "run_id": "6f1c0d0e-3b7a-4c55-9a51-0b8f6a0f2e11",
+  "mode": "observation",
+  "runner_outcome": "measured",
+  "error_code": null,
+  "error_detail": null,
+  "binding": "core:code-review/code",
+  "entry": "code-review",
+  "agent": "code-reviewer",
+  "posture": "review-read-only",
+  "registry_digest": "3d9e…",
+  "prompt_template_version": "sha256:8a41…",
+  "base_sha": "09f62a9c0…",
+  "head_sha": "4be7d1a2…",
+  "changed_files_count": 9,
+  "matched_files_count": 4,
+  "matched_lines_changed": 312,
+  "input_bytes": 1984,
+  "input_digest": "e8b0…",
+  "input_digest_match": true,
+  "reused_from": null,
+  "primitive_exit_code": 0,
+  "launched": true,
+  "outcome": "invocation_failed",
+  "outcome_detail": "permission_denied",
+  "verdict": "error",
+  "terminal_reason_missing": false,
+  "findings_count": 0,
+  "blocking_findings_count": 0,
+  "duration_ms": 141230,
+  "runner_wall_ms": 143911,
+  "timeout_seconds": 300,
+  "timed_out": false,
+  "model": "opus",
+  "cli_version": "2.1.288",
+  "num_turns": 11,
+  "total_cost_usd": 0.4120,
+  "usage": {"input_tokens": 41210, "cache_creation_input_tokens": 9120,
+            "cache_read_input_tokens": 120400, "output_tokens": 3311},
+  "envelope_unknown_fields": [],
+  "primitive_audit_record": "2026/10/2026-10-04T140051Z-agent-invocation-1a2b3c4d5e6f.json",
+  "auth_mode": "require-env-auth"
+}
+```
+- **`runner_outcome`** ∈ {`measured`, `reused`, `not_applicable`, `registry_error`, `binding_absent`,
+  `git_error`, `dirty_tree`, `lock_held`, `primitive_no_document`, `primitive_bad_output`,
+  `runner_timeout`, `interrupted`}.
+- On a non-`measured` outcome, the document-derived fields are `null`. `error_code` carries the
+  registry, git or primitive code, and `error_detail` is ≤ 500 chars.
+- Every envelope-derived string and number goes through `bounded_audit_str`/`bounded_audit_number`
+  (TD-D64's aliases): strings are capped at 500 chars, and numbers are int-or-float, never bool. The
+  same rule applies to each `envelope_unknown_fields` element, and the list is capped at 50 elements.
+  `usage` keeps only the four keys shown, each bounded as a number.
+- `timestamp` drives the shard path (`_resolve_ts`). `run_id` is `uuid4`, and it is the only
+  non-deterministic field.
+- `role` is omitted: W6 has no role (TD-D60).
+- *(architect, round 1 — two diagnostic fields added, for TD-G-O4.)* Both are `null` when no envelope
+  exists.
+  - **`permission_denied_tools`**: the sorted, de-duplicated `tool_name` strings from
+    `invocation.envelope.permission_denials`, each bounded by `bounded_audit_str`, the list capped at 20.
+    A non-dict entry or a missing/non-string `tool_name` contributes `"<malformed>"`. **`tool_input`
+    is never read into the record**: it carries paths and, for `Write`, file content.
+  - **`payload_extractable`**: `extract_payload(envelope) is not None` (TD-D64's fourth alias). It is
+    `true` by construction for `completed`. For `permission_denied` it separates "the agent produced a
+    valid verdict and also attempted a denied write" from "the agent produced no usable verdict". That
+    is the exact question TD-G-O4 needs answered, and without this field W6 would record the failure
+    without being able to diagnose it.
+- **The start record** is `{"event": "dimension-measurement-start", "schema_version": 1, "timestamp",
+  "run_id", "binding", "base_sha", "head_sha", "input_digest", "auth_mode"}`.
+
+**`report` output** (exit 0; exit 1 only when `read_stream` raises on a malformed record, with one
+stderr line naming the file):
+```json
+{
+  "schema": "hos.dimension-measurement-report", "schema_version": 1,
+  "binding": "core:code-review/code", "since": null,
+  "runs": 12, "abandoned": 0,
+  "by_runner_outcome": {"measured": 10, "not_applicable": 1, "reused": 1},
+  "launched": 10,
+  "by_outcome_detail": {"null": 3, "permission_denied": 5, "schema_violation": 2},
+  "terminal_reason_missing_count": 0,
+  "usage_limit_count": 0,
+  "timed_out_count": 0,
+  "input_digest_mismatch_count": 0,
+  "duration_ms": {"n": 10, "min": 61200, "p50": 128400, "p90": 241000, "max": 262100},
+  "duration_ms_completed_only": {"n": 3, "min": 61200, "p50": 98000, "p90": 131500, "max": 131500},
+  "total_cost_usd": {"n": 10, "min": 0.11, "p50": 0.29, "p90": 0.52, "max": 0.61, "sum": 3.47},
+  "num_turns": {"n": 10, "min": 4, "p50": 9, "p90": 14, "max": 16},
+  "matched_lines_changed": {"n": 10, "min": 12, "p50": 140, "p90": 610, "max": 1220},
+  "envelope_unknown_fields": [],
+  "cli_versions": ["2.1.288"]
+}
+```
+- Each stats object is `{"n": 0}` and nothing else when it has no data.
+- **`abandoned`** counts start records with no result record carrying the same `run_id`.
+- *(architect, round 1 — added to the report object.)* `terminal_reason_evaluated` (TD-D65, as
+  corrected); `payload_extractable_count`; `by_permission_denied_tool` (tool name → count of runs);
+  and `duration_ms_payload_produced`, the duration stats over launched runs with
+  `payload_extractable: true`. **`duration_ms_payload_produced` is the distribution admissible as ESC-1's
+  input** (§G.12, TD-G-O4). `duration_ms` (all launched) and `duration_ms_completed_only` stay, as
+  context. A run that produced no extractable payload did not demonstrably perform the review, so its
+  duration does not measure the review's cost. **Timed-out runs are the exception in reading, not in
+  computation:** they are right-censored observations of at least `timeout_seconds`, and excluding them
+  biases the distribution low. `timed_out_count` must always be reported beside
+  `duration_ms_payload_produced`, and it must never be dropped from ESC-1's input.
+
+### G.6 Fail-closed behaviour of the runner — observation-only still records every failure
+
+The rule is that **every failure after argument validation produces a result record**. Silence is never
+an outcome.
+
+| Failure | `runner_outcome` / `error_code` | Exit | Launch? |
+|---|---|---|---|
+| Registry load fails (`RegistryError`, including `yaml_unavailable` and L31 drift) | `registry_error` / the loader's `code` | 1 | no |
+| `MEASURED_BINDING` absent or suppressed | `binding_absent` | 1 | no |
+| Git fails, the base is unresolvable, or PL1 `bad_changed_file` | `git_error` / `git_failed` or `bad_changed_file` | 1 | no |
+| The tracked tree is dirty | `dirty_tree` | 1 | no |
+| The lock is held | `lock_held` | 1 | no |
+| The predicate selects nothing | `not_applicable`: the primitive is called with `--not-applicable "<PlanItem.reason>"` and no `--input-file`, so W1/W3 write their own record | 0 | no model |
+| The primitive exits 1 or 2 (no document) | `primitive_no_document` / `exit_<n>`, with `error_detail` = the bounded stderr tail | 1 | maybe |
+| The primitive exits 0 but stdout is not exactly one JSON object with `schema` = W1's | `primitive_bad_output` | 1 | yes |
+| The primitive exceeds `timeout_seconds + grace + 60` s | `runner_timeout`; the wrapper's process group is killed (`start_new_session=True`, `os.killpg`) | 1 | yes |
+| `invocation_failed` in any form (timeout, `usage_limit`, `permission_denied`, `terminal_reason_missing`, preflight) | `measured`, with the detail recorded | **0** | per the document |
+| SIGINT, or another exception after the start record | `interrupted` is written best effort, then re-raised | 130 / 1 | yes |
+| SIGKILL, or a power loss | none possible; the start record survives, and `report` counts it as `abandoned` | — | yes |
+| `write_event` raises | the record still goes to stdout, plus one stderr line *"dimension_sweep: record not written: …"* | 1 | — |
+
+- The primitive's stderr passes through to the runner's stderr unmodified (#1523), including W3's
+  `usage limit reached` line.
+- The runner never retries. It never relaunches after a failure, and it never maps `invocation_failed`
+  to anything other than `measured`, because the failure is the observation.
+
+### G.7 Discharge of forward obligations
+
+| Obligation | Source | How W6 discharges it |
+|---|---|---|
+| Report the "count of `terminal_reason_missing` observed", and state the consequence if any are seen | ADR §9.2 residual (`ADR:1120-1123`), §9.7 row (`:1308`) | `report.terminal_reason_missing_count`, with `terminal_reason_evaluated` as its denominator *(architect, round 1 — was `launched`)* (TD-D65; T6.08). A zero means zero over *n* runs on which A4 was actually evaluated, nothing more; a zero denominator is reported as undischarged. **Consequence if > 0** (ADR §9.2, verbatim): A4 reverts to tolerating absence, and the rename risk goes back on the record, unmitigated. That needs an **architect ADR amendment** plus a W1 classifier change, routed through `technical-design`. W6 automates neither, and it signals the case with one stderr line. |
+| TD-D43 (i)–(iii) bind "whichever of W6 and W7 first executes a deterministic `Binding.tool`" | TD-D50 (§F.2), §F.8 Q1 | **W6 executes none** (TD-D61; pinned by T6.27). (i)–(iii) bind **W7**, verbatim. |
+| The judgment-binding analogue of (i) and (ii), plus (iii) as TD-D34's hash | §F.2 architect round 1 (`TD:5156-5160` before this amendment) | (i′) the in-process `dr.load` with `packs=None`, with every agent, posture, prompt, timeout and predicate taken from the `Binding` (T6.03); (ii′) an argv list to `bootstrap/invoke_agent.sh` (T6.02); (iii′) `prompt_template_version` = TD-D34 (T6.04). TD-D61. |
+| Q4 "un-slow": un-mark one consolidated real-install `load(target)`-green case | §F.8 Q4 (a forward obligation on **W7's** TD) | **N/A to W6, and it stays with W7 unchanged.** The obligation is triggered when W7 makes L31 consumer-load-bearing and restores the sweep to the ship-list. W6 ships nothing and loads only HOS's own registry. W6 still honours the obligation's principle: **none of its 29 tests is `slow` or `integration`**, and its end-to-end agreement test against the real L2 (T6.19) runs on every PR. |
+| AD-13: runs as a script, never in a model session (Q4+Q6) | ADR AD-13, `:612-614` | It is a plain process started by a human (TD-D60). It refuses when `CLAUDECODE` or `HOS_CYCLE_ROLE` is set (T6.16), and no `bin/hos-cron` reference exists (T6.26). |
+| AD-13: keyed by `input_digest` | `:615-623` | TD-D64: computed before launch with W1's own functions, reused on a match (T6.18), and checked after launch (T6.19). |
+| AD-13: each record written durably as it completes | `:616-618` | TD-D63: a start record and a result record, each write-once, the start written before launch (T6.20). |
+| AD-13: concurrency 1 | `:630-632` | One invocation per process, plus the per-clone lock (TD-D60; T6.28). |
+| AD-16: every agent invocation goes through `invoke_agent.sh` | ADR AD-16; CLAUDE.md | TD-D61 (T6.02, T6.27). The existing T4.1 also stays green: there is no raw `claude` in the new file. |
+| `--require-env-auth` is mandatory for "the sweep runner" | `invoke_agent.sh:44-50`; ADR §9.3; AD-16.7 | It is strict by default, opting out only through `--allow-keychain-auth`, and no environment signal relaxes it (T6.17). |
+| `INVOKE_AGENT_PYTHON` must not appear in "the sweep runner (W6)" | ADR §10.3 condition 3 (`:1536`) | The new module never names it. The existing repo-wide grep test (`test_agent_invoke_cli.py:1381-1420`) already fails if it does. |
+| TD-D35 (a), (b), (c1), (c2) | §D.2 (labelled W7) | They move to W6 as the first renderer (TD-D62; T6.05). |
+| ESC-H "revisit after W6": a cost bound set *from* a measured distribution | ADR §9.6 | `report.total_cost_usd` is the input to that revisit. W6 adopts no `--max-budget-usd`. |
+| ADR §3: calibrate from this slice's output, never from estimates | ADR §3, `:738-742` | W6 reports raw distributions and calibrates nothing (TD-D65). |
+
+### G.8 Escalations — ESC-G1 (human)
+
+**ESC-G1 — authorise the W6 measurement campaign: who runs it, on what, and how much quota it spends.**
+(Cost model and operational obligation, at the product-boundary checkpoint.)
+
+By construction (TD-D60), W6 can be run **only by a human, by hand, from a plain terminal**. No agent
+session can run it, and no cron cycle can. That is a new, recurring manual obligation, and each run
+spends one real `code-reviewer` session (≤ 300 s, `total_cost_usd` per run unknown; that is the thing
+being measured).
+
+**The decisions that are yours:**
+- (a) Do you accept running it yourself, or do you prefer to wait until ESC-2 is answered and let W7
+  measure from a cron stage? Waiting means ESC-1 has no number until W7.
+- (b) The sample: how many launched runs, and which heads.
+- (c) Keychain auth (`--allow-keychain-auth`) or env-token auth.
+
+**Recommendation:**
+- (a) Yes, run it yourself. W7 is blocked on ESC-2, and ESC-1 needs the number first (ADR §5).
+- (b) At least 10 launched runs on **open or recent code-touching PR heads that contain W6**. Spread
+  them across diff sizes, including at least one with more than 500 matched changed lines, and run them
+  sequentially. That is about 10 sessions, and at most 50 minutes of your wall-clock at the 300 s cap.
+- (c) Whichever you use day to day. `auth_mode` is recorded, so the two can be separated afterwards.
+
+The procedure is short. For each head:
+
+```
+git checkout --detach <head>
+…/.venv/bin/python scripts/automation/dimension_sweep_cli.py measure --base origin/main
+```
+
+Then run `report`, commit the measurement records, and post the report (TD-D63).
+
+*(architect, round 1 — the procedure's technical shape is bound here; whether to run it at all, how
+many runs, and which auth remain the human's under ESC-G1.)*
+- **Where.** In **one dedicated linked worktree** created from the Human clone
+  (`git worktree add --detach <dir> origin/main`), reused for every run. **Never** in the Worker or
+  Overseer clone: a cron cycle there checks out branches in the shared working tree, which would change
+  the matched files under a live run (the digest check would catch it after the fact, but the review
+  would already be of mixed bytes). The interpreter is the Human clone's venv, by absolute path, since a
+  fresh worktree has no `.venv`. The records accumulate as untracked files in that worktree across
+  checkouts, which is what `report` and reuse read.
+- **Heads that predate W6.** A head without the W6 module cannot run it. Check out the old head
+  detached, then `git merge --no-edit origin/main`. After the merge, `origin/main` is the merge base,
+  so `<base>...HEAD` is exactly the PR's own change re-based onto the current registry, agents and
+  prompts. Skip a head whose merge conflicts. This removes the "contains W6" restriction on the sample.
+- **Pilot first, then the campaign.** Run **3** launched measurements and `report`. **Stop the campaign
+  and route to the architect** if any of the following holds:
+  - `terminal_reason_missing_count > 0` (ADR §9.2);
+  - 2 or more of the 3 have `payload_extractable` not `true` (TD-G-O4's prediction, in its harmful
+    form);
+  - `input_digest_mismatch_count > 0` (W7's reuse key is broken).
+
+  Otherwise continue to the agreed sample. A pilot that stops spends 3 sessions, not 10, and the
+  remaining runs are made after the TD-G-O4 fix, against the configuration W7 will actually run.
+
+**Unaffected and still yours:** ESC-1…ESC-4. W6 answers none of them; it supplies ESC-1's input.
+
+### G.9 Open questions — to `architect` (TD-G-O1 blocks the handoff; the rest are confirmations or routings)
+
+- **TD-G-O1 (confirm, BLOCKING): TD-D62 and TD-D59.**
+  - TD-D62 moves TD-D35 (a), (b), (c1) and (c2) from W7 to W6, with the literal change block and payload
+    instruction that W7 inherits.
+  - TD-D59 lands AD-13 as L2 only and defers `bootstrap/run_dimensions.sh` to W7. AD-13 binds both
+    names, so if you read the AD-13 bullet as requiring L3 in the first slice that lands the runner, say
+    so. L3 then becomes file 5, a protected-surface file that needs a CODEOWNERS gate.
+- **TD-G-O2 (confirm): the measured binding is `core:code-review/code`.**
+  - **Representativeness:** it is the broadest judgment predicate (`.py .sh .js .ts .jq`, non-test), so
+    it applies to almost every code PR and yields the most samples per head. Its agent is the
+    general-purpose lens, so its duration is a reasonable stand-in for the eight-lens median. If
+    anything it errs long, and long is the safe direction for a budget.
+  - **Measurement cost:** one session per head, and nothing that W8 would not spend anyway.
+  - **Rejected:**
+    - `security`: a similar predicate, but a narrower lens, and it would under-estimate.
+    - `infra`, `ui`, `a11y`, `privacy`: too rarely applicable to sample.
+    - `project:code-review/framework-validator`: HOS-only, so it does not represent a consumer.
+- **TD-G-O3 (confirm): TD-D60's two environment refusals.** They are one-direction refusals in the
+  AD-16.7 sense. `CLAUDECODE` is a vendor variable that the CLI could rename, and if that happens the
+  refusal quietly stops firing. T6.16 pins the name, not the vendor's behaviour. Is that acceptable for
+  a guard against accident?
+- **TD-G-O4 (routing; W7 blocker if confirmed): TD-VF-49.**
+  - All eight lens agents' CORE text instructs `Write` to `.claudetmp/`. `review-read-only` denies it,
+    and TD-D33 forbids the prompt from overriding the agent. That predicts systematic `permission_denied`
+    or `schema_violation`.
+  - W6 measures it and does not fix it. If W6 confirms it, W7 cannot proceed until the architect rules
+    on the agent/posture contract (an "invoked-as-dimension" mode, a posture change, or an agent-text
+    change, each with its own protected-surface gate).
+  - Separately: are durations from failed runs admissible as ESC-1's input? `report` splits the
+    `completed`-only distribution out for that reason.
+- **TD-G-O5 (routing, W3 follow-up): TD-VF-42.** `envelope_unknown_fields` is missing from the §5.2
+  audit record that ADR §9.7 required. This is a small additive W3 fix, with a §5.2 text correction and
+  one test. It is not folded into W6.
+- **TD-G-O6 (routing, W1 test hygiene): TD-VF-43.** The wrapper tests write W3 records into the real
+  `audit/log/` (6,958 here), and that pollutes the event stream W7 and any future reader would
+  aggregate. The fix is to have those tests point L3 at a temp copy or strip the audit write, which is
+  W1's call. W6 is immune by event name.
+- **TD-G-O7 (routing, W5 CLI): TD-VF-46.** `dimension_registry_cli.py plan --base` has no `-z`. That is
+  the same `core.quotePath` false-not-applicable defect that §F.8 Q2(c) fixed in the sweep.
+
+I file nothing. The orchestrating session files issues for TD-G-O4…O7 if the architect agrees.
+
+### G.10 Tests — T6.01…T6.29 (all inner-loop; **none** `slow` or `integration`)
+
+Every test drives `main(argv, repo_root=tmp_root)` in process, against a `tmp_path` git repository. That
+repository holds a copied `contract/dimensions/` tree, `.claude/agents/code-reviewer.md` and the postures,
+so **no test writes into the real `audit/log/`** (TD-VF-43). The primitive is reached through one seam,
+`_run_primitive(argv, *, timeout_s) -> (rc, stdout_bytes, stderr_bytes)`. Tests monkeypatch it to return
+canned W1 documents, built with `agent_invoke_cli.build_document`, unless the test says otherwise.
+
+*(architect, round 1 — two module-level autouse fixtures, both mandatory.)*
+- **Environment.** `monkeypatch.delenv` for `HOS_CYCLE_ROLE`, `CLAUDECODE` and
+  `CLAUDE_CODE_ENTRYPOINT` (`raising=False`). The inner loop runs inside worker sessions (where
+  `CLAUDECODE` is set; TD-VF-48) and inside overseer cron cycles (where `HOS_CYCLE_ROLE` is set). Without
+  this fixture every test except T6.16 would hit TD-D60's refusal and exit 2, so the suite would be red
+  exactly where it is required. T6.16 sets the variables explicitly, after the fixture.
+- **Model-launch tripwire.** `PATH` is prefixed with a `tmp_path` directory holding an executable
+  `claude` stub that writes a sentinel file and exits 99. Teardown asserts that the sentinel is absent.
+  No W6 test may launch a real model session, and T6.12/T6.19 come closest to the real seam. This makes
+  the property mechanical instead of a matter of reviewing each stub.
+
+| Test | Asserts |
+|---|---|
+| **T6.01** | Happy path: a `completed` document produces exactly one start record and one result record under `tmp_root/audit/log/`, with every §G.5 field present. Exit 0. stdout is one JSON object equal to the result record. |
+| **T6.02** | The argv is a `list`, starting `["bash", "<tmp_root>/bootstrap/invoke_agent.sh"]`, and it carries `--agent`, `--posture`, `--input-file`, `--timeout`, `--dimension code-review`, `--binding core:code-review/code`, `--lens code-review`, one `--matched-file` per match, `--base-sha`, `--head-sha`, `--prompt-template-version` and `--require-env-auth`. `shell=False`. |
+| **T6.03** | (i′) The registry is the only source. With the tmp `core.yaml` edited to `agent: security-reviewer`, `posture: review-read-only-gh-read` and `timeout_seconds: 120`, the argv carries all three. A PROJECT suppression of the binding gives `binding_absent`, exit 1, and no seam call. |
+| **T6.04** | `--prompt-template-version` equals `"sha256:" + sha256(template bytes)`, and the input file begins with exactly those bytes. |
+| **T6.05** | (c2) Two renders of the same inputs are byte-identical. The input contains no `run_id`, no `tmp_root` absolute path and no ISO timestamp. The payload block appears once, and it lists exactly `agent_invoke_cli.SEVERITIES`. |
+| **T6.06** | Not applicable: with only `docs/x.md` changed, the seam receives `--not-applicable "<reason>"` and no `--input-file`, and the record is `not_applicable`. Exit 0. |
+| **T6.07** | An `invocation_failed`/`timeout` document is recorded as `measured`, with `timed_out: true`. Exit 0. |
+| **T6.08** | A `terminal_reason_missing` document gives `terminal_reason_missing: true`. `report` then shows a count of 1 with `launched` 1, and prints the TD-D65 stderr line verbatim. A zero count prints no line. *(architect, round 1)* A `timeout` and an `unparseable` run raise `launched` but not `terminal_reason_evaluated`, and a `permission_denied` run raises both. With only timed-out runs, `report` prints the "evaluated on 0 runs" line. |
+| **T6.09** | A `usage_limit` document is recorded, `report.usage_limit_count` is 1, and the seam's stderr appears unmodified in the runner's stderr. |
+| **T6.10** | The seam returns rc 1 with an empty stdout. The record is `primitive_no_document`, `error_code` `exit_1`, and the stderr tail is bounded to ≤ 500. Exit 1. |
+| **T6.11** | The seam returns rc 0 with two JSON objects or non-JSON. The record is `primitive_bad_output`. Exit 1. |
+| **T6.12** | Runner timeout: the real seam runs a stub script that sleeps, with the timeout lowered through a test-only module constant. The record is `runner_timeout`, and the process group is gone afterwards. Wall time < 5 s. |
+| **T6.13** | A corrupt tmp `core.yaml` gives `registry_error` with the loader's `code`. Exit 1, no seam call. |
+| **T6.14** | An unknown `--base` gives `git_error`. A changed path `src/é.py` matches the predicate, because `-z` is used, and is passed through verbatim. |
+| **T6.15** | A modified tracked file gives `dirty_tree`, exit 1. An untracked `audit/log` file is allowed. |
+| **T6.16** | With `HOS_CYCLE_ROLE=worker`, separately with `CLAUDECODE=1`, and separately with `CLAUDE_CODE_ENTRYPOINT=cli` *(architect, round 1)*, the run exits 2, prints one stderr line naming the variable, makes no seam call and no git call, and writes zero records. |
+| **T6.17** | By default the argv contains `--require-env-auth` exactly once. With `--allow-keychain-auth` it does not, and `auth_mode` is `keychain`. No environment variable changes either. |
+| **T6.18** | Reuse: a prior `measured` record with the same precomputed digest gives `reused` and `reused_from` set, and the seam is never called. A prior `dirty_tree` record does not satisfy reuse. |
+| **T6.19** | Digest agreement against the **real** L2: the seam calls `agent_invoke_cli.main(argv_tail, repo_root=tmp_root)` in process, with `run_capped` spied (as T1.x does) to return a canned envelope. The test satisfies P1…P8 the way W1's own in-process tests do, including a dummy `CLAUDE_CODE_OAUTH_TOKEN` for P7, and captures stdout. Then `input_digest_match` is `true`, and the runner's precomputed digest equals the document's `input.input_digest`. |
+| **T6.20** | Durability: inside the seam, the start record already exists on disk. If the seam raises `KeyboardInterrupt`, an `interrupted` result record is written and the exception propagates. With the start record planted alone, `report.abandoned` is 1. |
+| **T6.21** | When `write_event` raises, the record is still on stdout, one stderr line is printed, and the exit is 1. |
+| **T6.22** | No prose: with sentinel strings in the document's `summary`, its finding descriptions, `envelope.result` and the template body, none appears in the bytes of any record. Also, after the whole module runs, the **real** repository's `audit/log/` file count is unchanged. *(architect, round 1)* A sentinel in a `permission_denials[].tool_input` appears in no record. `--document-out` pointing at `tmp_root/x.json`, or at a path under it through `..`, exits 2 with no record and no seam call. A path outside `tmp_root` is written. |
+| **T6.23** | `report` over fixture records gives exact JSON: counts, nearest-rank p50/p90, `abandoned`, the reuse count, `input_digest_mismatch_count`, and the union of `envelope_unknown_fields`. 500 interleaved `agent-invocation` fixture records change nothing. |
+| **T6.24** | `report` on an empty or absent `audit/log` gives `runs: 0` and stats `{"n": 0}`, exit 0. A malformed record gives exit 1 with one stderr line naming the file. |
+| **T6.25** | Single entry: the parser rejects `--binding`. `MEASURED_BINDING == "core:code-review/code"`. The subcommands are exactly `{measure, report}`. |
+| **T6.26** | Observation only (static): the module imports nothing from `merge_authority`, `merge_config`, `pr_readiness`, `envelope`, `correlation` or `overseer_state`. It does not name `post_comment.sh`, `pr_review.sh`, `submit_pr.sh` or `hos-cron`. `bin/hos-cron` contains neither `dimension_sweep` nor `run_dimensions`. |
+| **T6.27** | No deterministic execution: with a subprocess spy over the whole `measure` run, every argv is `git …` or `["bash", "<root>/bootstrap/invoke_agent.sh", …]`. No argv contains any `ResolvedRegistry.tools` entry. |
+| **T6.28** | Lock: while the lock is held, the record is `lock_held`, exit 1, with no seam call. Each of TD-D64's ~~three~~ **four** public names `is` its private original. *(architect, round 1)* With a linked worktree of `tmp_root` (`git worktree add`), a lock held from the main worktree gives `lock_held` in the linked one. |
+| **T6.29** *(architect, round 1)* | Diagnostics: a document whose envelope has `permission_denials` = `[{"tool_name": "Write", …}, {"tool_name": "Write", …}, {"tool_name": "Bash", …}, "junk"]` and a valid JSON `result` gives `permission_denied_tools == ["<malformed>", "Bash", "Write"]` and `payload_extractable: true`. The same with a markdown `result` gives `payload_extractable: false`. A `completed` document gives `true`, a `timeout` document with no envelope gives `null` for both. `report` over these shows `payload_extractable_count`, `by_permission_denied_tool`, and `duration_ms_payload_produced` over exactly the `true` runs. |
+
+### G.11 Startup-gap analysis and affected sign-offs
+
+*Should this have been settled in the initial technical design, before code was written against it?*
+
+**Yes, a `startup-artifact-gap` for the orchestrator to annotate. I file nothing.**
+- **TD-VF-42:** ADR §9.7's row for §5.2 was never applied, so W3 was built and approved against a §5.2
+  that omitted `envelope_unknown_fields`.
+- **TD-VF-43:** §9.1's wrapper-test plan never said the tests must not write into the real audit tree.
+- **TD-VF-46:** §7.10's `plan --base` predates TD-D51(c). This is the same class that §F.8 already
+  recorded for the sweep.
+- **TD-VF-49:** whether an agent's own write instructions survive a read-only posture should have been
+  asked when AD-7's postures (§3.6) and TD-D33's prompt rule were set. It is still unprobed.
+
+**No:**
+- **TD-D62's re-homing** is the same class as TD-D50, an obligation attached to a slice on an ordering
+  assumption. W6 had no design, so nothing was built against it.
+
+**Affected sign-offs:**
+- **W1 stands.** TD-D64 adds three alias lines and changes no behaviour, so a `code-reviewer` pass on
+  those lines is enough. TD-VF-43's test-hygiene fix, if it is done, is new work under its own review. It does
+  not invalidate W1's behavioural sign-offs.
+- **W3 stands** for what it was reviewed against. TD-G-O5's additive field is new work. The prior
+  approvals are not orphaned, because no decision reads the audit record (ADR-1604 AD-4).
+- **W5a, W5b, the hardening slice and W5c stand.** W6 consumes `load` and `resolve_for_diff` unchanged.
+  TD-VF-46's CLI fix, if it is done, re-opens only `plan --base` and its tests.
+- **W6 and W7 are unbuilt.** W7 inherits TD-D43 (i)–(iii), the Q4 un-slow obligation, the TD-D62
+  render baseline, the L3 file, and AD-14.
+
+### G.12 Architect review — round 1
+
+**Verdict: APPROVED_WITH_EDITS.** The edits marked *(architect, round 1)* above are binding. With them
+applied, the W6 code slice may go to the coder. **No human ruling is required before coding.** ESC-G1
+is human-owned and gates the measurement **campaign** only. No ADR erratum is needed. Iteration 1 of 5.
+The design converged in this round.
+
+**Verified against the tree (`09f62a9c0`; this branch's only delta is this document).**
+- Classifier precedence `agent_invoke_cli.py:581-712`: A1, A2 and the A3/A5/A6 shape checks precede A4,
+  and A4 precedes A5's value check. This is the basis of the TD-D65 denominator correction, and it is
+  why the §9.2 residual stays observable on `permission_denied` runs.
+- Any non-empty `permission_denials` gives `invocation_failed`/`permission_denied`, whatever the payload
+  (`:668`). `_extract_payload` is strict JSON with a fence tolerance only (`:485-527`).
+- `_matched_files_digest` (`:722-737`) and `compute_input_digest` (`:740-774`, `binding_sha256` `None`)
+  are as cited. So are the document's `invocation.envelope` carrying `permission_denials`
+  (`_build_invocation_block`) and `--not-applicable` excluding `--input-file` (`:1365-1366`).
+- `code-reviewer.md:103` (loop temp-state), `:113` and `:131-148` (register write and a **markdown**
+  response format). `review-read-only.settings.json` and `.hos.json` deny `Write`/`Edit` and
+  `Bash(python *)`.
+- The engine is at `scripts/automation/lib/dimension_registry.py`: `load` `:1004`, `resolve_for_diff`
+  `:1009`, `PlanItem.reason` always non-empty `:485-489`. `audit_log.write_event(event, *, root, ts)`
+  `:126`.
+- `protected_surfaces.txt`: `bootstrap/**` and `.claude/agents/**` are protected, and
+  `scripts/automation/**`, `tests/**`, `audit/**` and `docs/v0.7.0/**` are not. The 4-file slice
+  touches no protected surface.
+
+**TD-G-O1 (BLOCKING) — CONFIRMED, both halves.**
+- **TD-D59 (L2 only, L3 deferred to W7) is within technical-design's latitude. It is not structural
+  and needs no human.**
+  - The ADR itself splits AD-13 across slices. The §5 W6 row is "AD-13 runner, **one** judgment entry,
+    observation only", and the W7 row is "AD-13 **full**". The W6 row was never the full two-file
+    shape: it also omits the fan-out, the budget and the cron stage.
+  - AD-13's L3 exists for AD-1's reason, a statically allowlistable argv for **non-interactive**
+    callers. W6 has none, by TD-D60's construction. An L3 now would be a protected-surface file with no
+    caller, and the most likely first caller would be an agent session trying to nest.
+  - Deferring it changes no user-visible behaviour, no cost, no topology, no retention and no
+    operational burden. The product-boundary checkpoint is not triggered.
+  - **Binding on W7:** L3 lands with, or before, the first non-interactive caller. That is W7's cron
+    stage, which is behind ESC-2. W7's TD may not add a non-interactive caller of the L2 directly.
+- **TD-D62 (rendering moves from W7 to W6) is CONFIRMED.** It is forced: the primitive refuses to launch
+  without `--input-file` (`:1550`), and TD-D35's obligations are content-neutral about which slice
+  renders. It follows the TD-D50 precedent exactly, re-homing on ordering with the content unchanged.
+  - **One standing defect is surfaced and is not W6's to fix.** The rendered input carries both TD-D33
+    rule 5's sentence ("This prompt does not add to, remove from, or override your agent definition")
+    and TD-D35(b)'s payload instruction ("respond with exactly one JSON object"). `code-reviewer.md`'s
+    output contract (`:131-148`) requires a markdown response with a register-written footer. So the
+    payload instruction **does** override the agent definition, in a file that says it does not. I
+    approved both in Amendment D without seeing that they collide. That is mine, and it is folded into
+    TD-G-O4 below. W6 renders as designed, because W6 is how we learn which instruction the agent obeys.
+
+**Ruling 3 — no AD-14 PR comment: CONSISTENT with AD-14. CONFIRMED, and strengthened.**
+- AD-14 governs "dimension results", the records W8's constructor counts. A W6 observation is not a
+  dimension result: it gates nothing, and its sole consumer is ESC-1's calibration.
+- The forgery argument is right and is the decisive one. AD-15's constructor validates **structure**:
+  author, entry and `input_digest`. An observation posted under the overseer identity with the same
+  envelope type would pass it. Writing one now would manufacture exactly the record AD-14 exists to make
+  unforgeable.
+- `audit/log/` write-once records satisfy VF-5's durability requirement once committed. That is the
+  same class as the W3 `agent-invocation` records, so this is not a new retention surface. The edit to
+  TD-D63 makes the separation permanent: measurements are never results, and W7/W8 may not read them.
+- AD-14's storage-volume decision stays W7's.
+
+**Ruling 4 — prompt rendering in W6: CONFIRMED** (under TD-G-O1). TD-D62's literal change block and
+payload block become W7's baseline, and any change to either needs a TD amendment, because it moves
+every `input_digest`.
+
+**TD-G-O2 — `core:code-review/code`: CONFIRMED.** It is the broadest judgment predicate and the general
+lens, so it yields the most launched samples per head. "Errs long" is asserted rather than shown. That is
+acceptable, because W7 must re-measure per lens before setting per-entry budgets anyway (ADR §3 forbids
+extrapolating). `report` must not be read as an eight-lens number, and TD-D65 already refuses to project.
+
+**TD-G-O3 — environment refusals: ACCEPTED, with an edit.** As an accident guard in the AD-16.7 sense
+(refuse only, never relax), pinning a vendor variable name is acceptable. The edit adds
+`CLAUDE_CODE_ENTRYPOINT` as a second, independent trigger, so that one silent rename does not disable
+the guard. The new autouse fixture in §G.10 is **not optional**: the inner loop runs inside worker
+sessions and overseer cycles, where the guard would otherwise refuse every test.
+
+**TD-G-O4 (Ruling 5) — W6 runs AS DESIGNED, pilot first. The fix is a W7 blocker, unconditionally,
+and it is not a W6 prerequisite.**
+- **Is W6 still worth running?** Yes. It is the only probe of the prediction, and two of its three
+  questions survive the predicted failure:
+  - §9.2's `terminal_reason` count (A4 precedes A5);
+  - the cost of a session that actually does the review (the new `payload_extractable` field
+    separates those runs from the rest).
+
+  Without the edits, a `permission_denied` result was undiagnosable: it could not tell "reviewed, then
+  tried to write the register" apart from "produced nothing". With them, every pilot run says which.
+- **Why not fix it before W6.** The fix has three candidate shapes:
+  - an agent-text change;
+  - a posture change;
+  - a dimension-mode clause.
+
+  Choosing among them without one observed run is designing from a prediction, which is what ADR §3
+  forbids for the budget and is no better here. The pilot (§G.8, as edited) costs 3 sessions and settles
+  it. If the pilot stops, the remaining campaign runs **after** the fix, so ESC-1 is calibrated on the
+  configuration W7 will run. W6's code does not change either way, because the agent file is digested
+  input, not code.
+- **Why it blocks W7 whether or not W6 "confirms" it.** The conflict is in the text, not in the
+  observation. The agent definition orders a register write the posture denies, and a markdown response
+  that A8 rejects, while the rendered input orders the opposite and claims it overrides nothing. A sweep
+  that relies on which conflicting instruction a model happens to follow is not fail-closed design. It
+  is a coin toss that W8 would turn into a stream of `HUMAN_REQUIRED` escalations. **W7's TD may not be
+  approved until the dimension-mode contract is ruled and landed.**
+- **Where the fix lives (bounded now; the final shape is ruled after the pilot).**
+  - **Not the posture.** Granting `Write` to a dimension reviewer breaks AD-7's read-only property for
+    every lens.
+  - **Not the prompt alone.** TD-D33 rule 5 forbids it, and the rule is right: per-dimension prompt
+    overrides are how lens drift (ADR non-goal 1) would creep back in.
+  - **The leading shape** is a single CORE clause in each of the eight lens agents. When the agent is
+    invoked as a registry dimension, it writes no register or temp state and returns only the payload
+    contract, with the register entry produced by the runner, not by the agent. A matching amendment
+    narrows TD-D33 rule 5's sentence so that the payload contract is the one named, agent-sanctioned
+    exception.
+  - This touches `.claude/agents/**`, which is protected and CODEOWNERS human-gated, and it is authored
+    by the top-level session per CLAUDE.md (#1347), not by `coder`. It needs no separate product-boundary
+    escalation, because it changes no lens content, no cost and no topology, and its PR is human-approved
+    anyway. If the pilot shows a different failure, the shape is re-ruled.
+- **Are durations from failed runs admissible?** Only those with `payload_extractable: true`
+  (`duration_ms_payload_produced`), read together with `timed_out_count` as censored observations. A run
+  that produced no verdict did not demonstrably do the work being priced.
+
+**Ruling 6 — human ownership.**
+- **ESC-G1 is correctly human-owned.** It spends subscription quota (the cost model) and creates a
+  recurring manual obligation (operational). Both are product-boundary categories. The recommendation
+  stands, as amended by the pilot-first procedure.
+- **Nothing else in Amendment G is human-owned.**
+  - TD-D59 is ruled above.
+  - The committed `audit/log/` records are the existing record class, with no prose.
+  - `--document-out`, the only prose-bearing output, is now confined outside the tree.
+  - The TD-G-O4 fix reaches a human through CODEOWNERS when it lands, and its *shape* is mine to rule.
+- **ESC-1…ESC-4 remain open and untouched.** W6 supplies ESC-1's input and decides none of them.
+
+**Ruling 7 — forward obligations: each verified as discharged, not just asserted.**
+
+| Obligation | Status |
+|---|---|
+| ADR §9.2 `terminal_reason_missing` count | **Discharged, after the denominator edit.** As drafted, it divided by `launched`, which counts runs where A4 never ran, so a zero could be a non-observation. It now divides by `terminal_reason_evaluated`, and a zero denominator says "not discharged". |
+| TD-D43 (i)–(iii) / TD-D50 | **Discharged: they pass to W7.** W6 executes no `Binding.tool`, which T6.27 pins mechanically against every allowlisted tool, not one sentinel (the §F.8 standard). |
+| Judgment analogue (i′)/(ii′)/(iii′) (§F.2, TD ≈5158-5161) | **Discharged.** In-process `dr.load(root)` with `packs=None`, and every agent, posture, timeout, template and predicate field taken from the `Binding` (T6.03 proves it by mutating the registry and observing the argv). The argv list goes to `invoke_agent.sh` (T6.02, T6.27). TD-D34's hash is taken over the same bytes that are rendered (T6.04). |
+| §F.8 Q4 un-slow | **Correctly N/A to W6** and carried to W7 verbatim. W6 makes nothing consumer-load-bearing. |
+| AD-13: script, not session | **Discharged** by the refusals (now two vendor variables) and T6.26's static `hos-cron` check. |
+| AD-13: keyed by `input_digest` | **Discharged.** The key is precomputed with W1's own functions and checked after launch against the real L2 (T6.19). The `false` case is recorded, not raised, which is correct for an observation slice. |
+| AD-13: durable per record | **Discharged.** A start record precedes launch, the result is write-once, and an orphaned start is counted as `abandoned` (T6.20). The no-fsync residual is real and acceptable at observation stakes. |
+| AD-13: concurrency 1 | **Discharged after the lock edit.** The drafted `--git-path` lock was per-worktree, and the campaign runs in a worktree. |
+| AD-16 / §9.3 / §10.3 condition 3 | **Discharged.** Every invocation goes through `invoke_agent.sh`. Strict auth is the default, and keychain auth is the human-only opt-out (AD-16.7). The module never names `INVOKE_AGENT_PYTHON`. |
+| ESC-H revisit / ADR §3 no-calibration | **Discharged.** `report` emits raw distributions and makes no projection. |
+
+**Ruling 8 — hard constraints: all hold.**
+- No `bin/hos-cron` edit or stage; T6.26 pins the absence.
+- It gates nothing: no merge-path imports (T6.26), no PR comment, and measurements barred from W7/W8
+  (TD-D63 edit).
+- All invocation goes through `bootstrap/invoke_agent.sh` (T6.02, T6.27), with the launch tripwire
+  fixture as a backstop.
+- The registry comes only from the merged W5 engine (`load`, `resolve_for_diff`).
+- The code slice is **4 files** (the fourth alias adds a line to file 2 and no file). That is well
+  under 15.
+
+**Review set for the W6 PR.** `code-reviewer`, `security-reviewer` (subprocess argv, the process-group
+kill, the temp-file lifecycle, `--document-out` confinement, untrusted envelope fields entering committed
+records), `reliability-reviewer` (timeouts, interruption, the lock, fail-closed recording),
+`unit-test`. The overseer's merge ceiling applies as usual. No CODEOWNERS gate fires, and spend is gated
+by ESC-G1.
+
+**Follow-up issues the orchestrating session must file (I file nothing):**
+1. **TD-G-O4: the dimension-mode agent contract.** It blocks W7's TD approval and is a
+   `startup-artifact-gap` (my Amendment D rulings, TD-D33 rule 5 against TD-D35(b), and the lens agents'
+   register and markdown instructions). Its scope is the eight lens agents' CORE plus a TD-D33 rule 5
+   amendment. Protected surface, human-gated. Shape to be ruled by the architect on the W6 pilot's
+   evidence.
+2. **TD-G-O5: W3 audit record lacks `envelope_unknown_fields`.** This is non-conformance with ADR §9.7's
+   W3 row, which also required a W3 test that does not exist. A small additive W3 fix, plus the TD §5.2
+   text correction. `startup-artifact-gap`.
+3. **TD-G-O6: the wrapper tests write into the real `audit/log/`.** **Check #1803 first**, which covers
+   untracked audit records generally. If #1803 does not name the test-suite source, annotate it with
+   TD-VF-43's three signatures rather than filing a duplicate. Otherwise file it as W1 test hygiene,
+   `startup-artifact-gap`.
+4. **TD-G-O7: `dimension_registry_cli.py plan --base` lacks `-z`.** The same false not-applicable class
+   as §F.8 Q2(c). W5 CLI fix. `startup-artifact-gap`.
+5. **ESC-G1** goes to the human as written, with the §G.8 procedure as edited. It is posted by the
+   orchestrating session, not filed as a code issue.
+
+**Startup-gap and affected sign-offs.** I agree with §G.11, with one addition.
+- **The TD-D33/TD-D35(b) collision is a `startup-artifact-gap` in my own Amendment D ruling.** It
+  should have been caught when the prompt contract and the payload instruction were set beside the
+  agents' output contracts.
+- **What it leaves standing.** W5b's eight prompt files and T5.51 stand **until** the TD-G-O4 fix lands.
+  If the fix amends TD-D33 rule 5's canonical sentence, the W5b prompt files and T5.51 must be
+  re-reviewed against the amended text. That re-review is the fix PR's own review, and it orphans
+  nothing earlier.
+- **W1, W3, W5a/b/c and the hardening slice stand.** W6 consumes them unchanged, except for four alias
+  lines.
+
+---
+
+## Human Review Required — Amendment G (2026-10-03, W6 measurement slice)
+
+**RISK: MEDIUM.**
+- W6 launches **real model sessions** that spend subscription quota, and it writes committed-tree audit
+  records.
+- It gates nothing.
+- It cannot run unattended: it refuses cron and in-session callers, and no cron path names it.
+- It touches no protected surface, no merge-decision code and no agent file.
+- **The worst realistic failure is a wrong number:**
+  - (a) a sample that does not represent PR traffic;
+  - (b) a render that differs from W7's, so W7 is calibrated on a different input shape (TD-D62 binds
+    W7 to W6's render, which mitigates this);
+  - (c) TD-VF-49's predicted failures being read as cost data.
+
+  All three surface in `report`, not in a merge.
+
+**CONFIDENCE:**
+- **HIGH** on TD-VF-41…TD-VF-48. Each was re-read at the cited lines at `09f62a9c0`. TD-VF-43's counts
+  and signatures were computed from the records in this clone, and TD-VF-48's environment variable was
+  probed live.
+- **MEDIUM** on TD-VF-49. It is a prediction from the agent text and the posture, and it is unprobed by
+  design, because W6 is the probe.
+- **MEDIUM-HIGH** on TD-D59, TD-D62 and TD-D64, which need the architect's confirmation (TD-G-O1).
+- **LOW**, deliberately, on any implication for ESC-1. W6 produces none until it runs.
+
+**BLAST RADIUS:**
+- **This document:** the header banner, the Date line and Amendment G.
+- **Downstream:** the 4 files in §G.4.
+- **Runtime:** only when a human runs it.
+- **Forward:** W7 (TD-D43 (i)–(iii), the Q4 un-slow obligation, the render baseline, L3, AD-14). Also
+  W1, W3 and W5's follow-ups (TD-G-O5…O7).
+- **Not touched:** `bin/hos-cron`, the overseer, merge authority, the registry data, postures, agents, and
+  W1/W3 behaviour.
+
+**Change classification: ADDITIVE** (a slice the ADR orders but this TD never designed).
+- TD-D61 and TD-D62 **clarify** where existing obligations bind, and change none of their content.
+- **TD-D59 (deferring L3) is the one point the architect could judge STRUCTURAL**, because it departs
+  from AD-13's two-file shape for the first slice. If so ruled, it goes to a human before the coder
+  starts.
+- ESC-G1 is held for the human regardless.
+
+**Architect review is requested.** Iteration: Amendment G, round 1 of 5. Temp-state:
+`.claudetmp/design/technical-design-W6-<timestamp>.md`.
+
+**Not done here:** no code, test, data or script was written. No issue was filed, no label was created,
+no comment was posted, nothing was committed, and no register entry was written. The only probes were
+read-only: `env` names in this session, `claude --version`, and a count of the existing audit records.
