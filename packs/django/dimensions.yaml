@@ -1,0 +1,59 @@
+schema: hos.dimension-registry
+schema_version: 1
+owner: pack
+pack: django
+
+bindings:
+  - id: pack-django:code-review/app
+    entry: code-review
+    kind: judgment
+    agent: code-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/code-review.md
+    predicate:
+      include: ['\.py$', 'manage\.py$']
+      exclude: ['^tests/', '/test_[^/]*\.py$', '/migrations/', 'conftest\.py$', '^scripts/']
+
+  - id: pack-django:code-review/migrations
+    entry: code-review
+    kind: judgment
+    agent: code-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/code-review.md
+    predicate: { include: ['/migrations/.*\.py$'] }
+
+  - id: pack-django:ui/templates
+    entry: ui
+    kind: judgment
+    agent: ui-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/ui.md
+    predicate: { include: ['/templates/.*\.html$'] }
+
+  - id: pack-django:a11y/templates
+    entry: a11y
+    kind: judgment
+    agent: a11y-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/a11y.md
+    predicate: { include: ['/templates/.*\.html$'] }
+
+  - id: pack-django:privacy/pii-words
+    entry: privacy
+    kind: judgment
+    agent: privacy-reviewer
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/privacy.md
+    predicate: { include: ['(?i)erasure', '(?i)pii'] }
+
+  - id: pack-django:deterministic/django-check
+    entry: lint
+    kind: deterministic
+    tool: scripts/oversight/gates/django_check.sh
+    timeout_seconds: 300
+    predicate: { include: ['manage\.py$', '\.py$'] }

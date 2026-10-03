@@ -1,0 +1,43 @@
+schema: hos.dimension-registry
+schema_version: 1
+owner: project
+
+# This file is YOURS. The installer never overwrites it and never creates it.
+# It may declare bindings and suppressions. It may NOT declare `entries:` —
+# only contract/dimensions/core.yaml may, and that is what stops a compliant
+# configuration from being able to require nothing at all.
+#
+# Uncomment the example between the markers below and adapt it.
+#
+# --- example: begin ---
+# bindings:
+#   - id: project:privacy/app-modules      # AD-11: one application's module names
+#     entry: privacy
+#     kind: judgment
+#     agent: privacy-reviewer
+#     posture: review-read-only
+#     timeout_seconds: 300
+#     prompt_template: contract/dimensions/prompts/privacy.md
+#     predicate: { include: ['(?i)accounts', '(?i)booking'] }
+#
+#   - id: project:infra/deploy             # AD-11: one project's repo layout
+#     entry: infra
+#     kind: judgment
+#     agent: infra-reviewer
+#     posture: review-read-only
+#     timeout_seconds: 300
+#     prompt_template: contract/dimensions/prompts/infra.md
+#     predicate:
+#       include: ['^docker-compose\.yml$', '^Caddyfile$', '^scripts/backup\.sh$']
+#
+# suppress:
+#   - binding: pack-django:privacy/pii-words
+#     reason: >
+#       This project stores no personal data; the pack's PII word list matches
+#       our `pii_policy.md` docs and produces only false positives. Privacy is
+#       still enforced through project:privacy/app-modules.
+# --- example: end ---
+#
+# You may suppress a PACK or PROJECT binding. You may NOT suppress a `core:`
+# binding and you may NOT remove an entry — the entry keeps running and keeps
+# blocking through its remaining bindings.

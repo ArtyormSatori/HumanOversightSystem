@@ -1,0 +1,15 @@
+schema: hos.dimension-registry
+schema_version: 1
+owner: project
+bindings:
+  - id: project:code-review/framework-validator
+    entry: code-review
+    kind: judgment
+    agent: framework-validator
+    posture: review-read-only
+    timeout_seconds: 300
+    prompt_template: contract/dimensions/prompts/code-review.md
+    predicate:
+      include: ['^\.claude/agents/', '^scripts/framework/', '^bin/', '^bootstrap/',
+                '^contract/', '^AGENTS\.md$', '^CLAUDE\.md$',
+                '^docs/AGENTS\.md$', '^docs/OVERSIGHT-RUNBOOK\.md$']
