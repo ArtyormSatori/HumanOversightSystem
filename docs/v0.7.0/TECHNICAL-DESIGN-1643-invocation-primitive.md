@@ -6749,6 +6749,115 @@ by ESC-G1.
 - **W1, W3, W5a/b/c and the hardening slice stand.** W6 consumes them unchanged, except for four alias
   lines.
 
+### G.13 Coder deviations — rulings (W6 code, 7787d0c02)
+
+I checked every claim against the tree at `7787d0c02` before ruling. Every ruling is `clarifying` or
+`additive`. None is `structural`, and none needs the architect. RISK: LOW. Where a ruling changes the
+contract, this subsection amends §G.5, §G.6 and §G.10 as stated, and it takes precedence over the
+earlier text.
+
+| # | Deviation | Ruling |
+|---|---|---|
+| 1 | T6.03: a PROJECT suppression of `core:code-review/code` gives `registry_error`/`suppress_core`, and `binding_absent` is reached by monkeypatching `MEASURED_BINDING` | **ACCEPT** |
+| 2 | A start-record write failure is recorded as `interrupted`/`start_record_unwritable`, exit 1, no launch | **REJECT**: use a distinct outcome, `audit_unwritable` |
+| 3 | Every refusal names its variable: `"<VAR> is set — <reason>"` | **ACCEPT** |
+| 4 | Digest cannot be computed: `input_digest` is null, the run still launches, `input_digest_match` is null, reuse is skipped | **ACCEPT** |
+| 5 | `_BLOCKING_SEVERITIES` is a local copy | **REJECT**: add a fifth alias |
+| 6 | Runner timeout: SIGTERM to the group, wait 5 s, then SIGKILL | **ACCEPT the sequence, but one change is required**: SIGKILL must always be sent |
+
+**1 — ACCEPT. The TD was wrong.** `dimension_registry.py:908-912` (L16) raises
+`RegistryError("suppress_core", …)` for any suppression of a `core:` binding. That means a suppressed
+`MEASURED_BINDING` can never reach the runner. TD-D61's "missing or suppressed" and T6.03's "a PROJECT
+suppression … gives `binding_absent`" describe a state the loader does not allow.
+- T6.03b asserts the real behaviour: `registry_error`/`suppress_core`, exit 1, no seam call.
+- T6.03c reaches `binding_absent` through a nonexistent id: exit 1, no seam call, no start record.
+- Together they pin both paths.
+- **Amends** TD-D61 (i′) and §G.6's row to read *"`MEASURED_BINDING` absent, or not `judgment`"*. A
+  suppression is §G.6's `registry_error` row. T6.03's last sentence is replaced by T6.03b and T6.03c as
+  implemented.
+
+**2 — REJECT. Required change.** §G.6 defines `interrupted` as an exception **after** the start
+record, on a run that launched (exit 130/1, "Launch? yes"). This case has no start record, no launch and
+no interruption. Recording it as `interrupted` makes `by_runner_outcome` tell ESC-1's reader that a run
+was killed when none was attempted. The coder's fail-closed behaviour is right: it refuses to launch
+without a durable start record. Only the label is wrong.
+- `dimension_sweep_cli.py:689`: raise `_Fail("audit_unwritable", "start_record_unwritable", str(exc))`.
+  Keep the existing stderr line, exit 1, `launched: false` and no seam call.
+- **Amends** §G.5: add `audit_unwritable` to the `runner_outcome` enum. **Amends** §G.6: add the row
+  *"`write_event` raises on the start record | `audit_unwritable` / `start_record_unwritable` | 1 |
+  no"*. The result record then follows §G.6's existing last row: stdout always, plus the audit tree if
+  the write succeeds.
+- **Add test T6.20b.** Monkeypatch `_write` to raise only for `event == EVENT_START`. Assert exit 1, no
+  seam call, a stdout record with `runner_outcome == "audit_unwritable"` and
+  `error_code == "start_record_unwritable"`, and at least one stderr line beginning
+  `dimension_sweep: record not written:`.
+- `report` needs no change. The new value counts under `by_runner_outcome`. It is never launched, and it
+  never satisfies reuse.
+
+**3 — ACCEPT.** T6.16 requires *"one stderr line naming the variable"* for all three variables, and the
+architect's round-1 text requires the same for `CLAUDE_CODE_ENTRYPOINT`. TD-D60's quoted `CLAUDECODE`
+sentence did not name its variable, which contradicted T6.16.
+- The implemented form, `"dimension_sweep: refused: <VAR> is set — <reason>"` (`:216-218`), matches the
+  `HOS_CYCLE_ROLE` message and satisfies T6.16.
+- **Amends** TD-D60: the `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` messages are
+  `"dimension_sweep: refused: <VAR> is set — running inside a Claude Code session — W6 must be run from a plain terminal (ADR-1643 Q4+Q6, no nested sessions)"`.
+
+**4 — ACCEPT.** `_precompute_digest` (`:504-530`) returns `None` only on `OSError` or `PostureError`
+while reading the agent file or the posture. In those cases W1's own preflight fails the same way and
+records a preflight `invocation_failed` document before any model launch. That is §G.6's "`measured`,
+with the detail recorded" row, and it spends no quota.
+- A null key never satisfies reuse, because `_find_prior` is skipped when `digest` is falsy (`:635`).
+- A null-digest record can never be a reuse target for a later run.
+- `input_digest_match: null` is not counted by `input_digest_mismatch_count`, which counts only `False`.
+  That is correct: no comparison was possible.
+- The start record carries `input_digest: null`. That is allowed.
+- **Amends** TD-D64 with: *"If a digest component cannot be computed, `input_digest` and
+  `input_digest_match` are `null`, reuse is skipped, and the primitive is still called so that it
+  records its own preflight failure."* No new test is required. A one-line T6.18 case is welcome but
+  not blocking.
+
+**5 — REJECT. Required change.** TD-D64's rule is *"an alias, never a copy"*, because a second copy
+drifts silently. `blocking_findings_count` is useful only if it counts what L2's classifier counts
+(`agent_invoke_cli.py:161`, used at `:1077`). The comment at `dimension_sweep_cli.py:103` admits that
+the local set mirrors L2's.
+- In `agent_invoke_cli.py`, after `:1026`, add one alias line: `blocking_severities = _BLOCKING_SEVERITIES`.
+  The private name stays, and behaviour is unchanged.
+- In `dimension_sweep_cli.py`, delete `:103-104` and use `aic.blocking_severities` at `:446`.
+- **Amends** TD-D64 and §G.4: W6 adds **five** alias lines to `agent_invoke_cli.py`. Each is additive,
+  so §G.12's "W1 … stand" is unaffected.
+
+**6 — ACCEPT the SIGTERM → 5 s → SIGKILL sequence. One change is required.** Sending SIGTERM first is
+better than §G.6's bare `os.killpg`: the wrapper and the CLI get a chance to exit cleanly. The defect is
+in `_kill_group` (`:323-333`). It returns as soon as the **leader** exits after SIGTERM. A group member
+that ignores SIGTERM, and has closed or detached its stdio, therefore survives, and no SIGKILL is ever
+sent. §G.6 ("the wrapper's process group is killed") and T6.12 ("the process group is gone afterwards")
+require the whole group to be gone.
+- `_kill_group` must send SIGKILL to the group **unconditionally** after the SIGTERM grace, whether or
+  not the leader has exited. It ignores `ProcessLookupError`, then reaps the leader.
+- **T6.12** must assert on the group, not the leader PID: `os.killpg(<pgid>, 0)` raises
+  `ProcessLookupError` afterwards. The stub should also leave a background child that traps SIGTERM
+  (for example `trap '' TERM; sleep 60 &` before the foreground sleep), with `_KILL_GRACE_S`
+  monkeypatched to a value ≤ 1, so that the escalation path is exercised and wall time stays < 5 s.
+- **Amends** §G.6's `runner_timeout` row to read: *"the process group gets SIGTERM, then SIGKILL after
+  `_KILL_GRACE_S` (5 s), always"*. The same `_kill_group` serves the SIGINT/exception path, which is
+  correct.
+
+**Startup-gap and affected sign-offs.**
+- Items 1, 2, 4 and 6 are contract gaps that §G should have settled before coding:
+  - item 1 is a TD error against L16;
+  - items 2 and 4 are omissions from §G.6 and TD-D64;
+  - item 6 underspecified the kill sequence.
+- Each one qualifies as a `startup-artifact-gap`. Under this dispatch's constraints I filed nothing. The
+  orchestrating session should annotate #1643 with them, or file one issue for all four.
+- Items 3 and 5 are TD drift that the code exposed. Both are closed above.
+- **Affected sign-offs: none orphaned.** No W6 register exists (`.claudetmp/signoffs/` has no
+  `step1643-W6` file). No reviewer has approved `7787d0c02`, so the code review runs once, against
+  this amended contract.
+- The architect's round-1 approval of §G stands. Every amendment here is additive or clarifying within
+  W6's own record schema and runner. None touches TD-D63's "a measurement is never a dimension result"
+  boundary or anything W7 or W8 read.
+- The architect is notified of these edits for the record. No approval round is needed.
+
 ---
 
 ## Human Review Required — Amendment G (2026-10-03, W6 measurement slice)
