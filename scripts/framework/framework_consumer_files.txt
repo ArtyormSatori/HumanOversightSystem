@@ -13,6 +13,8 @@
 #       cut_release.sh, validate_*.sh, check_agents_static.sh,
 #       check_validation_current.sh, strip_internal_paths.sh,
 #       run_framework_validation.sh, run_tests_release.sh
+#   - scripts/framework/run_post_change_sweep.sh — withheld until #1643 W7 ships the registry modules (#1930 option (b))
+#   - contract/dimensions/project.yaml (consumer-owned, TD-D19) and contract/resolved-packs.txt (installer-generated, TD-D27)
 #
 # One file path per line (relative to repo root). Blank lines and # comments ignored.
 
@@ -56,7 +58,6 @@ scripts/framework/gen_codeowners.sh
 scripts/framework/gen_scripts_index.sh
 scripts/framework/protected_surfaces.txt
 scripts/framework/provision_agent_account.sh
-scripts/framework/run_post_change_sweep.sh
 scripts/framework/run_tests_inner_loop.sh
 scripts/framework/setup_branch_protection.sh
 
@@ -83,3 +84,19 @@ scripts/framework/rerun_gate_checks.py
 scripts/framework/requester_trust.py
 scripts/framework/select_work_candidates.py
 scripts/framework/trusted-requesters.txt.example
+
+# ── contract/dimensions/ — review-dimension registry data (#1643 W5, §C.2.11 item 1) ──
+contract/dimensions/core.yaml
+contract/dimensions/postures/review-read-only-gh-read.hos.json
+contract/dimensions/postures/review-read-only-gh-read.settings.json
+contract/dimensions/postures/review-read-only.hos.json
+contract/dimensions/postures/review-read-only.settings.json
+contract/dimensions/project.yaml.template
+contract/dimensions/prompts/a11y.md
+contract/dimensions/prompts/code-review.md
+contract/dimensions/prompts/infra.md
+contract/dimensions/prompts/ops.md
+contract/dimensions/prompts/privacy.md
+contract/dimensions/prompts/reliability.md
+contract/dimensions/prompts/security.md
+contract/dimensions/prompts/ui.md

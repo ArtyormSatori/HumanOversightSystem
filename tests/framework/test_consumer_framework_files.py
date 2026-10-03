@@ -8,6 +8,7 @@ declare a file the install didn't ship. These tests fail if:
   - the installer stops reading the list on either side (copy OR manifest)
   - HOS-dev-only tools leak into the consumer set
 """
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,9 +47,9 @@ def test_list_exists_and_nonempty():
 
 def test_every_listed_file_exists_in_source():
     for f in _consumer_files():
-        assert (ROOT / f).is_file(), (
-            f"framework_consumer_files.txt lists {f} but {ROOT / f} is missing from source"
-        )
+        assert (
+            ROOT / f
+        ).is_file(), f"framework_consumer_files.txt lists {f} but {ROOT / f} is missing from source"
 
 
 def test_bin_lib_git_credentials_present():
@@ -112,3 +113,35 @@ def test_installer_reads_list_on_both_sides():
         "hos_install.sh must reference framework_consumer_files.txt in BOTH the "
         "copy-loop and enumerate_framework_files (the manifest enumerator)"
     )
+
+
+_ITEM1_DIMENSION_PATHS = (
+    [
+        "contract/dimensions/core.yaml",
+        "contract/dimensions/project.yaml.template",
+    ]
+    + [
+        f"contract/dimensions/postures/review-read-only{v}.{k}.json"
+        for v in ("", "-gh-read")
+        for k in ("settings", "hos")
+    ]
+    + [
+        f"contract/dimensions/prompts/{n}.md"
+        for n in ("code-review", "security", "privacy", "reliability", "ops", "ui", "a11y", "infra")
+    ]
+)
+
+
+def test_ship_list_holds_registry_data_and_withholds_generated_and_sweep():
+    """#1643 W5c T5.47 (static half): item-1 registry data ships; project.yaml,
+    resolved-packs.txt and (until W7, #1930 option (b)) the sweep do not."""
+    listed = set(_consumer_files())
+    assert len(_ITEM1_DIMENSION_PATHS) == 14
+    missing = [p for p in _ITEM1_DIMENSION_PATHS if p not in listed]
+    assert not missing, f"ship-list lacks item-1 registry paths: {missing}"
+    for withheld in (
+        "contract/dimensions/project.yaml",
+        "contract/resolved-packs.txt",
+        "scripts/framework/run_post_change_sweep.sh",
+    ):
+        assert withheld not in listed, f"{withheld} must not be on the ship-list"
