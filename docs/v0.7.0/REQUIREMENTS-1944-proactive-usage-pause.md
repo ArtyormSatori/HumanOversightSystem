@@ -34,7 +34,16 @@ alerting with an email + SMS contact point, shipped as a worked example, not a c
 (D17, D17b). Capped history log, export/backfill, and `last-raw`, recorded as a **clarification** of
 "no ever-growing logs" (D18). No hardcoded thresholds (D19). New FR-51–FR-67 and AC-31–AC-52. §0,
 §3, §5–§8 and the Human Review section are updated to match.
-**Date:** 2026-10-02 (Amendment 2 and Amendment 3: 2026-10-03)
+**Amendment 4 (2026-10-03, pm-agent):** Applies ADR-1944 Amendment 4 A4-9, the requirements side of
+human rulings H-1, H-2, H-3, H-4 and H-7 (cited as "human ruling, interactive session 2026-10-03,
+H-n"). H-1: each fail-open cycle without a usable reading writes one `cycle-usage-unchecked` audit
+event, and the release notes, upgrade checklist and runbook carry a fixed warning sentence (FR-22,
+FR-65, AC-9, AC-46). H-2: `contrib/monitoring/**` is **not** protected surface; a PR-required
+required-alert test is the guard instead (new FR-68, AC-47, FR-62). H-3: alerting changes are
+applied on monitrix by a root systemd path unit (FR-58, FR-62). H-4: AC-44 procedure confirmed
+(AC-44). H-7: new AC-53, the S1 trip test, gates S2. Also rewords AC-40 (TD-O-16) and AC-35
+(TD-O-22). §7, §8 and the Human Review section are updated to match.
+**Date:** 2026-10-02 (Amendments 2, 3 and 4: 2026-10-03)
 **Author:** pm-agent
 **Source issues:** #1944 (open, `priority:critical`, v0.6.1. Its body is authoritative, and its
 2026-10-02 "Design decisions ruled today" section governs wherever it conflicts with older material,
@@ -279,6 +288,10 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   distinguishable*). The human is alerted by monitoring: Grafana alerting on the "reading failed"
   and "reading stale / poller dead" alerts (FR-62). Fail-open is only safe once alerting is live
   (FR-67).
+  **[A4: H-1]** Each fail-open cycle that runs without a usable successful reading writes one
+  `cycle-usage-unchecked` audit event (fields: role, project, cycle_id, reason, session_pct,
+  weekly_all_pct, reading_age_s, fail_mode, settings; one `key=value` per argument). No block and no
+  issue.
   *Was:* ~~**[ASSUMED]** (AS-3): after N consecutive failed polls in fail-open mode (N configurable),
   one deduped `needs-human` issue is filed.~~ (superseded by D3, D7).
 - **FR-23 [A3: D1]: Auto-resume.** When a later successful read shows **all three** limits strictly
@@ -446,6 +459,11 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
 
 - **FR-49:** Changes to `bin/hos-cron` (and anything else under `bin/**`) are protected surface and
   need human merge approval (CODEOWNERS). This is expected and not a blocker (#1944 Process note).
+- **FR-68 (new, A4: H-2):** `contrib/monitoring/**` is not protected surface. Removing or weakening
+  a required alert is guarded by the required-alert test (AC-47), and is visible to normal PR risk
+  review. #1944 adds no entry of any kind to the protected-surface list. Human rationale (recorded):
+  protected surfaces are already too broad (#1935), and human review must be restricted to what
+  really matters.
 
 ### L. Poll placement and pause mechanism (Amendment 1; Amendment 3)
 
@@ -503,7 +521,11 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
 - **FR-58: Grafana file provisioning (D9).** The dashboard JSON, the alert rules, and the contact
   point are delivered by Grafana **file provisioning**, not UI import. They live in the HOS repo under
   `contrib/monitoring/` and are **not** shipped to consumers by `hos_install.sh`. `allowUiUpdates` is
-  false. Grafana reloads provisioned files on its own.
+  false. **[A4: H-3]** Grafana reloads provisioned dashboards on its own. Alert-rule and
+  contact-point changes are applied by a root systemd path unit on the monitoring host, which
+  restarts grafana-server when the provisioned alerting files change, with health check and rollback.
+  *Was:* ~~Grafana reloads provisioned files on its own.~~ (false premise for alerting, identified in
+  ADR-1944 A2-14; corrected by H-3).
 - **FR-59: monitrix sync (D9).** monitrix holds a **read-only** clone of HOS over **anonymous
   HTTPS** (no deploy key), with sparse-checkout limited to `contrib/monitoring/`. A cron
   `git pull --ff-only` updates it. The sync job writes its own health gauges (last good pull
@@ -521,7 +543,8 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   real endpoints or secrets.
 - **FR-62: Required alerts (D17).** At minimum: pause condition (`hos_claude_usage_pause_condition`
   = 1); reading failed; reading stale / poller dead; metrics absent; `settings_valid` = 0; non-zero
-  read cost or tokens; `history_write_ok` = 0; dashboard sync stale.
+  read cost or tokens; `history_write_ok` = 0; dashboard sync stale; **[A4: H-2/H-3]** read cost or
+  tokens unknown on a successful read; alerting reload failed on the monitoring host.
 - **FR-63: Worked example, not a requirement (D17b).** HOS ships this setup as a documented
   **worked example / "recommended setup"** in `contrib/monitoring/` plus a doc: faberix poller →
   `node_exporter` → monitrix Prometheus → Grafana alerting → Cloudflare Worker email + SMS relay.
@@ -538,6 +561,8 @@ is the credential, never TTY or pty. The read costs $0 and makes no model call.
   every cycle pauses (fail-closed, no reading file) with a log line naming the reason. This lasts
   until the host sets up the poller or sets `fail_mode=open`. The release notes and the upgrade
   checklist carry the setup step. There is **no** consumer-default-off switch.
+  **[A4: H-1]** The release notes, the upgrade checklist, and the runbook contain the sentence:
+  'fail_mode=open without a running poller means no quota protection'.
 - **FR-66: One install-path definition (D14).** The poller and gate install path is defined in
   **one** place (the runbook / crontab line), so #1276 changes one line. The design does not assume
   it runs from a git clone. The cross-clone writable-`bin/` risk (ESC-T1) is an **accepted
@@ -591,8 +616,9 @@ envelopes whose `result` holds the captured text.
 - **AC-8 (negative, consumer side) [A3: D6]:** Reading file older than the staleness window → fail
   mode. Missing file → fail mode. Truncated or garbled file → fail mode. Each case produces its own
   distinct reason.
-- **AC-9 [A3: D3, D7]:** Fail-open setting plus empty-session fixture → no pause and no GitHub call.
-  The reading file records the failure, and the parse-status health gauge shows the failure.
+- **AC-9 [A3: D3, D7] [A4: H-1]:** Fail-open setting plus empty-session fixture → no pause, no
+  GitHub call, **and exactly one `cycle-usage-unchecked` audit event**. The reading file records the
+  failure, and the parse-status health gauge shows the failure.
 - **AC-10 (auto-resume) [A3: D1, D7]:** Paused at session 92%. The next read shows all three limits
   below threshold (e.g. 40% / 30% / Fable 10%) → the next cycle runs with no human action.
   *Was:* ~~… and the proactive-pause issue is auto-closed.~~
@@ -677,9 +703,13 @@ envelopes whose `result` holds the captured text.
   cycles of **every** configured project on the host skip. No `~/.hos/suspend/*` file is created,
   changed, or removed. An interactive session is not affected. The next under-threshold reading
   resumes all of them with no cleanup step.
-- **AC-35 (D7, no GitHub calls):** With the GitHub boundary stubbed, a run covering an over-threshold
-  pause, a fail-closed failure, a fail-open failure, invalid settings, and a resume makes **zero**
-  GitHub calls (no issue, comment, label, or dedup query).
+- **AC-35 (D7, no GitHub calls) [A4: TD-O-22]:** With the GitHub boundary stubbed, a run covering an
+  over-threshold pause, a fail-closed failure, a fail-open failure, invalid settings, and a resume
+  shows that **a paused cycle makes zero network calls, and the gate adds none to a running cycle**
+  (a running cycle's call list equals that of the same cycle with a plain under-threshold reading).
+  The gate makes no issue, comment, label, or dedup call in any case.
+  *Was:* ~~… makes **zero** GitHub calls (no issue, comment, label, or dedup query).~~ Read
+  literally, that would forbid `hos-cron`'s ordinary work on running cycles (TD-O-22).
 - **AC-36 (D18, history cap: days):** History files older than `history_days` are deleted on the
   next poll, even when the total size is under `history_max_mb`.
 - **AC-37 (D18, history cap: size):** When the total history size exceeds `history_max_mb`, the next
@@ -693,8 +723,10 @@ envelopes whose `result` holds the captured text.
 - **AC-39 (D18, write order):** With the `.prom` write or the history write made to fail, the
   reading file is still written correctly and the decision is unchanged. A history-write failure
   sets `history_write_ok` = 0. The reading file is written before either.
-- **AC-40 (D18, `last-raw`):** After a success poll and then a parse-failure poll, `last-raw` holds
-  exactly the second poll's raw output. Only one such file exists.
+- **AC-40 (D18, `last-raw`) [A4: TD-O-16]:** After a success poll and then a parse-failure poll, the
+  bytes after `last-raw`'s header line are exactly the second poll's raw output. Only one such file
+  exists. *Was:* ~~`last-raw` holds exactly the second poll's raw output~~ (the header line is
+  ADR-1944 A2-11's; TD-O-16).
 - **AC-41 (D13, non-zero read cost alert):** The alert rule exists in `contrib/monitoring/`. It fires
   on a non-zero `hos_claude_usage_read_cost_usd` and, separately, on a non-zero
   `hos_claude_usage_read_tokens`. It does not fire when both are 0.
@@ -706,18 +738,23 @@ envelopes whose `result` holds the captured text.
   received by SMS. Until then, the SMS integration is present as a placeholder.
 - **AC-44 (D17, definition of done):** **#1944 is not done until a real pause alert has been
   delivered.** That means a recorded end-to-end run in which `hos_claude_usage_pause_condition` = 1
-  produces an alert received by email through the contact point.
+  produces an alert received by email through the contact point. **[A4: H-4]** (procedure: lower
+  one threshold below current live usage, observe the pause and the email, record, restore; all
+  autonomous work pauses for about 10–15 minutes and running cycles finish first)
 - **AC-45 (D19, no hardcoded thresholds):** A static check finds no literal threshold in the
   dashboard JSON or the alert rules, outside named values at the top of a rules file. Changing a
   threshold in `usage-pause.conf` changes the matching `hos_claude_usage_threshold_percent` series,
   and the dashboard line and alert follow it with no file edit.
 - **AC-46 (D10, consumer with no poller):** On a host with the gate installed but no poller, every
   worker and overseer cycle pauses (fail-closed), and the log line names the missing reading as the
-  reason. With `fail_mode=open`, cycles run. The release notes and the upgrade checklist contain the
+  reason. With `fail_mode=open`, cycles run, each writing one `cycle-usage-unchecked` audit event
+  naming the project and cycle_id; the release notes contain 'fail_mode=open without a running
+  poller means no quota protection' **[A4: H-1]**. The release notes and the upgrade checklist contain the
   poller setup step. No setting exists that turns the gate off by default for consumers.
-- **AC-47 (D17, required alerts and placeholders):** Every alert in FR-62 exists in
-  `contrib/monitoring/` and routes to the single contact point, which has both an email and an SMS
-  integration. A static check finds no real endpoint URL or secret in the repo, only placeholders.
+- **AC-47 (D17, required alerts and placeholders) [A4: H-2]:** Every alert in FR-62 exists in
+  `contrib/monitoring/`, is enabled, and routes to the single contact point, which has both an email
+  and an SMS integration. A test in the PR-required suite (`scripts/framework/run_tests_inner_loop.sh`)
+  asserts each required alert by stable rule UID, and asserts both integrations. A static check finds no real endpoint URL or secret in the repo, only placeholders.
   `hos_install.sh` does not install `contrib/monitoring/`.
 - **AC-48 (D5, forced-command line is final only after a real read):** After the FR-3 entry is
   installed, a real `--check` read returns real session and weekly percentages. The entry is not
@@ -736,6 +773,16 @@ envelopes whose `result` holds the captured text.
   `>=` threshold, 1 on a fail-closed failed read, and 0 under fail-open on a failed read with no limit
   over. There is exactly one such series for the machine. With no success on record,
   `last_success_timestamp_seconds` is 0.
+
+**New in Amendment 4:**
+
+- **AC-53 (H-7):** **S1 trip test (recorded before S2 is built).** On faberix, with S1 deployed and
+  no gate installed, a threshold in `usage-pause.conf` is temporarily set below the current live
+  value of its limit. The next cron-fired poll writes `poll_pause_condition=1` to the reading file,
+  with `poll_pause_reason` naming that limit, its value, and the lowered threshold.
+  `bin/hos-usage-poll --check` reports `pause_condition=1` with the same reason. After the threshold
+  is restored, the next poll writes `poll_pause_condition=0`. The run is recorded on #1944, and S2 is
+  not built until it is.
 
 ---
 
@@ -893,6 +940,16 @@ From #1944 (carried over unchanged unless marked):
 | AC-49 | human ruling, interactive session 2026-10-03, D13 |
 | AC-51 | human ruling, interactive session 2026-10-03, D3, D7b, D14, D18 |
 | AC-52 | human ruling, interactive session 2026-10-03, D8 |
+| FR-22, FR-65 (A4 additions) | **human ruling, interactive session 2026-10-03, H-1** (`cycle-usage-unchecked` event; fixed release-note sentence); ADR-1944 A4-1, A4-9 items 1–2 |
+| FR-58 (A4 correction) | **human ruling, interactive session 2026-10-03, H-3** (root systemd path unit reload); ADR-1944 A2-14, A4-4, A4-9 item 8 |
+| FR-62 (A4 additions) | **human ruling, interactive session 2026-10-03, H-2, H-3** (read cost/tokens unknown; alerting reload failed); ADR-1944 A4-3, A4-5, A4-9 item 6 |
+| FR-68 | **human ruling, interactive session 2026-10-03, H-2** (protected surface rejected in favour of the required-alert test; rationale: protected surfaces already too broad, #1935; human review restricted to what really matters); ADR-1944 A4-2, A4-3, A4-9 item 7 |
+| AC-9, AC-46 (A4 changes) | **human ruling, interactive session 2026-10-03, H-1**; ADR-1944 A4-9 items 3–4 |
+| AC-35 (A4 rewording) | TD-1944 TD-O-22 (accepted by architect); ADR-1944 A2-4 intent |
+| AC-40 (A4 rewording) | TD-1944 TD-O-16 (accepted by architect); ADR-1944 A2-11 header line |
+| AC-44 (A4 procedure) | **human ruling, interactive session 2026-10-03, H-4**; ADR-1944 A4-6, A4-9 item 10 |
+| AC-47 (A4 change) | **human ruling, interactive session 2026-10-03, H-2**; ADR-1944 A4-3, A4-9 item 5 |
+| AC-53 | **human ruling, interactive session 2026-10-03, H-7**; ADR-1944 A4-7, A4-9 item 9 (architect wording, verbatim) |
 | D-1 | Human directive 2026-10-02; #1944 addendum; **met** by capture 2 (human ruling, interactive session 2026-10-03, D13) |
 | D-2 | #1944 Reference; #1446 05:17:05Z |
 | D-3 | #1944 10-02 "Dashboarding" + Q4 |
@@ -972,6 +1029,33 @@ From #1944 (carried over unchanged unless marked):
 - **Confirmations (no supersession):** AS-2 (D2); Q11's conservative reading, minus issue filing
   (D4); architect ruling A1-3 (D12); ESC-1 option (a) (D10); ESC-T1 accepted risk (D14).
 
+**Amendment 4 supersessions (all: human ruling, interactive session 2026-10-03, unless noted):**
+
+- **S-18 (H-1):** Human Review item 8 (a consumer on fail-open with no poller and no alerting is
+  silent) → resolved per the architect's recommendation: D10 kept as ruled; each fail-open cycle
+  without a usable reading writes one `cycle-usage-unchecked` audit event; the release notes, upgrade
+  checklist and runbook carry "fail_mode=open without a running poller means no quota protection".
+  No block and no issue. FR-22, FR-65, AC-9, AC-46. The alternative (an explicit acknowledgement key)
+  was not chosen.
+- **S-19 (H-2), REJECTION:** ADR-1944 A2-14's proposal to make `contrib/monitoring/**` protected
+  surface → **rejected**. Human rationale: protected surfaces are already too broad (#1935), and
+  human review must be restricted to what really matters. Replacement control: the PR-required test
+  `tests/framework/test_monitoring_required_alerts.py`, which asserts each required alert by stable
+  rule UID plus both contact-point integrations. Accepted residual: one PR editing both the rules
+  file and the test is not mechanically blocked, only review-visible. FR-68, AC-47, FR-62.
+- **S-20 (H-3):** FR-58's "Grafana reloads provisioned files on its own" (false for alert rules and
+  contact points; ADR-1944 A2-14) → dashboards only; alerting changes are applied by a root systemd
+  path unit on the monitoring host with health check and rollback. FR-58, FR-62 (reload-failed alert).
+- **S-21 (H-4), CONFIRMATION:** the AC-44 definition-of-done procedure (lower one threshold, observe
+  pause and email, record, restore; ~10–15 minutes of paused autonomous work). AC-44 text added for
+  clarity; no behavior change.
+- **S-22 (H-7), NEW:** S2 is not built until the S1 trip test is recorded on #1944. AC-53.
+- **S-23 (TD-O-16, clarifying; architect-accepted):** AC-40 "holds exactly the second poll's raw
+  output" → "the bytes after the header line". The header is ADR-1944 A2-11's.
+- **S-24 (TD-O-22, clarifying; architect-accepted):** AC-35's literal "zero GitHub calls" across
+  running cycles → "a paused cycle makes zero network calls, and the gate adds none to a running
+  cycle". The literal reading would forbid `hos-cron`'s ordinary work.
+
 ---
 
 ## Escalation flag (CORE self-flag)
@@ -990,10 +1074,28 @@ D18 is recorded as a **clarification** of the "no ever-growing logs" principle, 
 Terminology changes ("status file" → "reading file") are **clarifying**. No change in this amendment
 goes beyond a ruling, apart from the points listed below as ambiguous.
 
+Amendment 4 classification: H-1, H-2, H-3 and H-7 changes are **structural**, and each is
+**human-ruled** (human ruling, interactive session 2026-10-03, H-1 / H-2 / H-3 / H-7); the ruling
+is the sign-off. H-4 (AC-44 procedure text) and the AC-35 / AC-40 rewordings (TD-O-22, TD-O-16)
+are **clarifying**: they make the existing intent checkable without changing behavior. Nothing in
+Amendment 4 goes beyond ADR-1944 A4-9 or the cited rulings. RISK: HIGH (unchanged; H-2 replaces a
+human merge gate with a test guard, by human ruling). CONFIDENCE: 90% on the transcription of A4-9.
+
 ## Human Review Required
 
 Earlier items now ruled and removed: C-1; [DERIVED] FR-22, FR-25, FR-30 (D3, D7b, D4); AS-1/2/3
 (D1, D2, D3); Q11 (D4); D-1 (capture 2); FR-11 / C-6 (D12).
+
+**Resolved in Amendment 4 (human ruling, interactive session 2026-10-03):**
+- **H-1: RESOLVED (confirmed as recommended).** Per-cycle `cycle-usage-unchecked` audit event plus
+  the fixed release-note sentence; no block, no issue. This also resolves item 8 below (S-18).
+- **H-2: RESOLVED (rejected, replaced).** `contrib/monitoring/**` is not protected surface; the
+  PR-required required-alert test is the guard (FR-68, AC-47). Rationale: protected surfaces are
+  already too broad (#1935), and human review must be restricted to what really matters (S-19).
+- **H-3: RESOLVED (confirmed).** Root systemd path unit reload on monitrix (FR-58, S-20).
+- **H-4: RESOLVED (confirmed).** AC-44 procedure (S-21).
+- **H-7: RESOLVED (new ruling, applied).** S1 trip test gates S2 (AC-53, S-22).
+- Not requirements rulings (tracked in ADR-1944 A4-8): H-5 (informational) and H-6 (human actions).
 
 Still open:
 1. **[DERIVED] FR-24** (the pause must not stop the poll): confirm. It is satisfied structurally by
@@ -1018,7 +1120,7 @@ Still open:
 7. **D18 history "same fields as the reading":** whether the reading file (and so the history and
    the backfill export) carries the breakdown gauges, or only the decision fields. This decides
    whether a backfill can restore the breakdown dashboard panels.
-8. **D10 vs D3/D17b:** a consumer may set `fail_mode=open` to get past the no-poller pause (D10), but
+8. **RESOLVED by H-1 (Amendment 4, S-18).** *Original:* **D10 vs D3/D17b:** a consumer may set `fail_mode=open` to get past the no-poller pause (D10), but
    alerting is a worked example the consumer need not adopt (D17b). Fail-open being safe only with
    alerting (D3) is runbook text only. Nothing prevents a consumer from running fail-open with no
    poller and no alerting, which is silent.
