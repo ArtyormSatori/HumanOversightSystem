@@ -16,6 +16,8 @@
 #   HEAD~1          git diff --name-only HEAD~1   (any positional starting with HEAD)
 #   --staged        git diff --cached --name-only
 #   file1 file2     explicit repo-relative files (no repository needed)
+#                   (a positional beginning with HEAD is treated as a ref, so a file
+#                   such as HEADER.md must be passed as ./HEADER.md)
 #   --json          stdout is exactly the registry CLI's `plan` JSON ("[]" for an empty set)
 #
 # A positional argument that is neither an existing path nor HEAD* but resolves
@@ -124,10 +126,11 @@ CHANGED=()
 
 # git_diff_paths <git diff args...>: appends the NUL-separated paths to CHANGED.
 git_diff_paths() {
-    local rc=0 p
+    local rc=0 p msg
     git -C "$REPO_ROOT" diff --name-only -z "$@" >"$TMPD/diff.out" 2>"$TMPD/diff.err" || rc=$?
     if [[ $rc -ne 0 ]]; then
-        die "git diff failed (diff --name-only -z $*): $(head -n 1 "$TMPD/diff.err")"
+        msg="$(grep -m1 '^fatal:' "$TMPD/diff.err" || head -n 1 "$TMPD/diff.err")"
+        die "git diff failed (diff --name-only -z $*): $msg"
     fi
     while IFS= read -r -d '' p; do
         CHANGED+=("$p")

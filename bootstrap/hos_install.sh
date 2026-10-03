@@ -2155,11 +2155,13 @@ for _rk_row in "${_REGISTRY_KINDS[@]}"; do
     if [[ -f "$_rk_src" ]]; then
       cp_framework_file "$_rk_src" "$TARGET_REPO/$_rk_dst" "$_rk_dst"
       if ! $DRY_RUN && [[ -f "$TARGET_REPO/$_rk_dst" ]]; then
-        _generated_whole_rows+=("$_rk_dst"$'\t'WHOLE$'\t'"$(_sha256 "$TARGET_REPO/$_rk_dst")")
+        _rk_sha="$(_sha256 "$TARGET_REPO/$_rk_dst")"
+        [[ -n "$_rk_sha" ]] || { err "sha256 failed for $_rk_dst"; exit 1; }
+        _generated_whole_rows+=("$_rk_dst"$'\t'WHOLE$'\t'"$_rk_sha")
       fi
     elif [[ -e "$TARGET_REPO/$_rk_dst" ]]; then
       run rm -f -- "$TARGET_REPO/$_rk_dst"
-      warn "$_rk_dst removed — pack '$_rk_slug' ships no $_rk_source"
+      warn "$_rk_dst $($DRY_RUN && echo 'would be removed' || echo removed) — pack '$_rk_slug' ships no $_rk_source"
     fi
     _rk_i=$((_rk_i + 1))
   done
@@ -2175,7 +2177,7 @@ for _rk_row in "${_REGISTRY_KINDS[@]}"; do
     done
     if ! $_rk_keep; then
       run rm -f -- "$_rk_path"
-      warn "$_rk_dir/$_rk_base removed — pack '$_rk_slug' is no longer resolved"
+      warn "$_rk_dir/$_rk_base $($DRY_RUN && echo 'would be removed' || echo removed) — pack '$_rk_slug' is no longer resolved"
     fi
   done
 done
@@ -2192,7 +2194,9 @@ else
     for _rk_p in ${_resolved_packs[@]+"${_resolved_packs[@]}"}; do printf '%s\n' "$_rk_p"; done
   } > "$TARGET_REPO/contract/resolved-packs.txt"
   ok "contract/resolved-packs.txt"
-  _generated_whole_rows+=("contract/resolved-packs.txt"$'\t'WHOLE$'\t'"$(_sha256 "$TARGET_REPO/contract/resolved-packs.txt")")
+  _rp_sha="$(_sha256 "$TARGET_REPO/contract/resolved-packs.txt")"
+  [[ -n "$_rp_sha" ]] || { err "sha256 failed for contract/resolved-packs.txt"; exit 1; }
+  _generated_whole_rows+=("contract/resolved-packs.txt"$'\t'WHOLE$'\t'"$_rp_sha")
 fi
 
 # 4. .gitattributes — L31 hashes raw bytes, so the HOS-hashed files must not be

@@ -287,9 +287,12 @@ def test_t5_47_drift_blocked_install_writes_no_registry_data(tmp_path):
     agent.write_bytes(edited)
     pack_file = target / "contract" / "dimensions" / "pack-django.yaml"
     pack_file.unlink()
+    resolved = target / "contract" / "resolved-packs.txt"
+    resolved_before = resolved.read_bytes()
 
     r = _run_installer(target, "--pack", "django")
     assert r.returncode == 4, r.stdout + r.stderr
+    assert resolved.read_bytes() == resolved_before, "aborted install rewrote resolved-packs.txt"
     assert not pack_file.exists(), "Phase A abort must precede the registry-data step"
 
 
@@ -358,10 +361,13 @@ def test_t5_69_autocrlf_checkout_stays_green_and_control_drifts(tmp_path):
     _git(target, "add", "-A")
     _git(target, "commit", "-q", "-m", "drop attributes")
     _recheckout_with_autocrlf(target)
-    # Without -text the checkout rewrote the HOS-hashed files to CRLF; the
-    # loader refuses (L24 pack-slug parse or the manifest/L31 checks, whichever
-    # runs first), which proves the green case above discriminates.
-    with pytest.raises(dr.RegistryError, match="CRLF|installed_drift|invalid pack slug"):
+    # Without -text the checkout rewrote the HOS-hashed files to CRLF.
+    assert b"\r\n" in (target / "contract" / "resolved-packs.txt").read_bytes()
+    assert b"\r\n" in (target / "contract" / "dimensions" / "core.yaml").read_bytes()
+    # L24 parses resolved-packs.txt before L31 hashes it, so "invalid pack slug"
+    # is the first failure under CRLF (TD-VF-39's installed_drift expectation is
+    # pre-empted); this proves the green case above discriminates.
+    with pytest.raises(dr.RegistryError, match="invalid pack slug"):
         dr.load(target)
 
 

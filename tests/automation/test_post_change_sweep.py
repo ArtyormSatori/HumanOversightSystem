@@ -314,10 +314,12 @@ def test_t5_48_venv_rung_is_used_when_override_is_unset(tmp_path):
     venv_python = tree / "scripts/oversight/.venv/bin/python"
     venv_python.parent.mkdir(parents=True)
     # A wrapper, not a symlink: a symlink outside the venv loses pyvenv.cfg and PyYAML.
-    venv_python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    marker = tmp_path / "venv-rung-used.marker"
+    venv_python.write_text(f'#!/bin/sh\ntouch "{marker}"\nexec "{sys.executable}" "$@"\n')
     venv_python.chmod(venv_python.stat().st_mode | stat.S_IXUSR)
     proc = run(tree, "myapp/views.py", python=None)
     assert proc.returncode == 0, proc.stderr
+    assert marker.exists(), "rung 2 (venv python) was not used"
 
 
 def test_t5_48_ladder_rungs_match_invoke_agent_in_order():
@@ -337,6 +339,8 @@ def test_t5_65_sweep_executes_no_allowlisted_tool(tmp_path):
     tools = core["tools"]
     assert "scripts/run_second_review.sh" in tools
 
+    planted: set[str] = set()
+
     def plant(tree: Path) -> None:
         for rel in tools:
             target = tree / rel
@@ -345,8 +349,11 @@ def test_t5_65_sweep_executes_no_allowlisted_tool(tmp_path):
             name = Path(rel).name
             target.write_text(f'#!/bin/sh\ntouch "{tree}/SENTINEL-{name}"\n')
             target.chmod(0o755)
+            planted.add(rel)
 
     tree = sweep_tree(tmp_path, ["django"], prep=plant)
+    assert planted, "no allowlisted tool was planted; the sentinel check would be vacuous"
+    assert {"scripts/oversight/gates/lint_check.sh", "scripts/run_second_review.sh"} <= planted
     assert sorted(p.name for p in tree.glob("SENTINEL-*")) == []
     for extra in ((), ("--json",)):
         proc = run(tree, *extra, "myapp/views.py")
