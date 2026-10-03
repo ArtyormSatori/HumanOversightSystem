@@ -1,6 +1,6 @@
 # TECHNICAL DESIGN — ADR-1944: proactive Claude usage-threshold pause. A loopback poller writes one reading, `hos-cron` gates every cycle on it, and the monitoring path can never touch the decision
 
-**Status:** **Revision 2 (ADR A2), DRAFT. Waiting on `architect` review, round 1 of a fresh 5-round cap for the amended sections (ADR A2-22).** Revision 1 (DRAFT-1 plus Architect round 1, "approved with changes", 2026-10-03) was built against ADR text that Amendment 2 supersedes: AD-3's per-role status file, AD-8's issue machinery, AD-5's `env -u` command, the two-threshold rule, plain-text parsing, and AD-12's slicing. This revision implements ADR-1944 Amendment 2 (A2-1 to A2-22) and Requirements Amendment 3 (human rulings D1–D19, interactive session 2026-10-03). Every section changed by this revision is headed or tagged **"Revision 2 (ADR A2)"**. Text that A2 removes is deleted. A one-line "Removed by Revision 2" note marks where it stood, and git history keeps the old text (commit `918fe1769`, `67769516b`). Material that Amendment 2 leaves standing is kept and tagged "unchanged".
+**Status:** **Revision 2 (ADR A2) + Architect round 2 (2026-10-03): APPROVED WITH CHANGES.** The round-2 changes are applied inline, each tagged **"Architect round 2"**, and listed in §11.3. ADR Amendment 3 records the four ADR-level refinements (A3-1 to A3-5). Coding gates are unchanged: S1 may start; S2 waits on H-1, S4 on H-2/H-3, S5 on H-4 (§13). (Round count: the amended sections opened at round 1 under A2-22; this is round 2 of 5.) Revision 1 (DRAFT-1 plus Architect round 1, "approved with changes", 2026-10-03) was built against ADR text that Amendment 2 supersedes: AD-3's per-role status file, AD-8's issue machinery, AD-5's `env -u` command, the two-threshold rule, plain-text parsing, and AD-12's slicing. This revision implements ADR-1944 Amendment 2 (A2-1 to A2-22) and Requirements Amendment 3 (human rulings D1–D19, interactive session 2026-10-03). Every section changed by this revision is headed or tagged **"Revision 2 (ADR A2)"**. Text that A2 removes is deleted. A one-line "Removed by Revision 2" note marks where it stood, and git history keeps the old text (commit `918fe1769`, `67769516b`). Material that Amendment 2 leaves standing is kept and tagged "unchanged".
 **Date:** 2026-10-03 (Revision 1: 2026-10-02)
 **Author:** technical-design
 **Baseline:** worktree `interactive-1944-proactive-usage-pause-design`, HEAD `0603100b9` (ADR Amendment 2). `bin/hos-cron` is 2245 lines and every anchor cited below was re-read at this HEAD (TD-VF-14).
@@ -257,6 +257,8 @@ The bash crash fallback follows the same steps with `printf … > <file>.tmp; mv
 
 `stream=stdout` (the full raw stdout) when `read=exited`; `stream=stderr` (the stderr tail: the **last** 65536 bytes) on `timeout`, `spawn_failed`, or `exited` with `rc=255`. Nothing reads `last-raw` for a decision. **AC-40 is asserted on the bytes after line 1** (TD-O-16).
 
+**Architect round 2 (A2-11 "overwritten each poll").** A poll that wrote a reading but never reached P6 (P4 or P5 refusal) still overwrites `last-raw`, with the header only: `read=none rc=- stream=none bytes=0`. The header grammar's `read` and `stream` sets gain `none`. *Reason:* in Revision 2 a key-missing poll left the previous poll's raw output in place, so an operator debugging `read_failed:ssh_failed` would read an unrelated, older capture. A lock-held exit (P3) is not a poll and writes nothing. Test: `test_last_raw_no_read_header_only`.
+
 ### 1.7 Audit events — Revision 2 (ADR A2-5)
 
 ~~Transition events `cycle-usage-pause`, `cycle-usage-resume`, `cycle-usage-degraded`~~ **Removed by Revision 2.**
@@ -298,7 +300,7 @@ The bash crash fallback follows the same steps with `printf … > <file>.tmp; mv
 - the bounds: `THRESHOLD_MIN = 1`, `THRESHOLD_MAX = 100`, `POLL_INTERVAL_MIN = 60`, `POLL_INTERVAL_MAX = 3600`, `POLL_INTERVAL_STEP = 60`, `STALENESS_MAX = 7200`, `READ_TIMEOUT_MIN = 5`, `READ_TIMEOUT_MARGIN = 30`, `HISTORY_DAYS_MIN = 1`, `HISTORY_DAYS_MAX = 3650`, `HISTORY_MAX_MB_MIN = 1`, `HISTORY_MAX_MB_MAX = 10240`;
 - `DEFAULTS: Mapping[str, int|str|None]`, built from the names above (`claude_bin: None`).
 
-Static test S1-ST10 (AC-45 for code): (a) the block markers appear exactly once each; (b) **no `ast.Compare` node anywhere in the module has a numeric `Constant` operand other than `0` or `1`** — every other number used in a comparison must be a named module-level constant; (c) the literals `90`, `300`, `900`, `60`, `100` do not appear as numeric constants outside the block.
+Static test S1-ST10 (AC-45 for code): (a) the block markers appear exactly once each; (b) **no `ast.Compare` node anywhere in the module has a numeric `Constant` operand other than `0` or `1`** — every other number used in a comparison must be a named module-level constant; (c) **(Architect round 2, replaces the Revision 2 wording)** inside any function or class body, no numeric `Constant` equals `90`, `300`, `900`, `60` or `100`. Outside the block, those values may appear only as the whole right-hand side of a module-level `UPPER_CASE = <int>` assignment whose name does not start with `DEFAULT_` (e.g. `RESETS_CAP_CHARS = 100`, which §1.3's `*_resets ≤ 100` cap needs). *Reason:* the Revision 2 wording banned every `100` outside the block, so the §1.3 format caps could not be named at all; the test would have pushed format caps into the settings block. D19 targets thresholds, and (b) already enforces it for comparisons.
 
 ### 1.9 Fixtures (byte-exact) — Revision 2 (ADR A2) adds §1.9.2 and §1.9.4
 
@@ -593,7 +595,7 @@ hos-usage-poll --help                            # first description line, verba
 - **P8. (S3) Step 2 — the `.prom`.** If `_WROTE=1`: `python3 "$_LIB" write-prom --state-dir "$_STATE" || echo "… WARN: prom export failed (ignored; never affects the pause)"`. The first render omits `history_write_ok` (A2-11).
 - **P9. (S3) Step 3 — history + prune.** If `_WROTE=1`: `python3 "$_LIB" history-append --state-dir "$_STATE"` prints exactly `history_write_ok=0|1` and exits 0. Anything else → `_HWO=0` and a WARN line.
 - **P10. (S3) Re-render.** If `_WROTE=1`: `python3 "$_LIB" write-prom --state-dir "$_STATE" --history-write-ok "$_HWO" || WARN`.
-- **P11. Step 4 — `last-raw`** (S1). If P6 ran: `python3 "$_LIB" last-raw --state-dir "$_STATE" --read K --rc N --stdout F --stderr F --run-epoch <from reading or now> || WARN`.
+- **P11. Step 4 — `last-raw`** (S1). If P6 ran: `python3 "$_LIB" last-raw --state-dir "$_STATE" --read K --rc N --stdout F --stderr F --run-epoch <from reading or now> || WARN`. **Architect round 2:** if P6 did not run but P7 was reached, `python3 "$_LIB" last-raw --state-dir "$_STATE" --read none --run-epoch <…> || WARN` (header only, §1.6).
 - **P12. `_on_exit` (EXIT trap).** `rm -f` both `poll.*.tmp`; `rm -rf` the lock; if `_WROTE≠1`, try `poll-record --transport-reason crashed --detail "exit=<code> at <step>"`; if that also fails, write the §1.3 minimal crash file in bash (§1.5); never re-raise.
 
 Steps P8–P11 are each independently best-effort: a failure is logged to `poll.last.log` (the crontab redirect) and changes nothing earlier in the order (FR-54). S1 ships P1–P7, P11, P12; S3 inserts P8–P10 in place.
@@ -663,7 +665,7 @@ Outline (S1 writes all except 2a.8, which S3 adds; S2 adds 2a.0 and the §7 rows
 - **2a.7 Verify.** First run `--check --capture-fixture …` (keep the file; attach it to #1944), then `--check` → `RESULT: PASS`. **Item 8 must be green after every upgrade of any project on the host** — it checks every scheduled `hos-cron` copy for the gate (AC-51).
 - **2a.8 (S3) Metrics export on faberix.** Root step (§5.1), symlink verification, fallback, ESM-purge note.
 - **2a.9 Fail-open (FR-67, AC-51).** "`fail_mode=open` is safe **only once alerting is live** (`contrib/monitoring/`, AC-43 and AC-44 recorded). On faberix it is forbidden until S5 is recorded (A2-18)."
-- **2a.10 Reading the state.** `cat ~/.hos/usage-pause/reading` (raw values, `poll_*` = the poller's view); `cat ~/.hos/usage-pause/last-raw` (parse-failure debugging); `[PAUSED-USAGE]` / `[USAGE-OK]` / `[USAGE-UNCHECKED]` lines in `/tmp/hos-<role>-<project>.log`; `cycle-usage-paused` audit records. No GitHub issue is ever filed (D7).
+- **2a.10 Reading the state.** `cat ~/.hos/usage-pause/reading` (raw values, `poll_*` = the poller's view); `cat ~/.hos/usage-pause/last-raw` (parse-failure debugging); `[PAUSED-USAGE]` / `[USAGE-OK]` / `[USAGE-UNCHECKED]` lines in `/tmp/hos-<role>-<project>.log`; `cycle-usage-paused` audit records. No GitHub issue is ever filed (D7). **Architect round 2 (TD-O-18):** "A paused cycle never pushes audit records. They stay in the clone's `audit/log/` and are pushed by the first running cycle after the pause ends. During a long pause (e.g. waiting for the weekly reset) the cron log is the up-to-date record; the audit branch catches up on resume."
 - **2a.11 (S3) History and backfill (AC-51).** Daily JSONL under `~/.hos/usage-pause/history/`, pruned every poll to `history_days`/`history_max_mb`. Backfill: §5.5 procedure, verbatim.
 - **§7 rows (S2):** `reason=poller_not_installed|reading_missing|reading_stale` → `--check`, `crontab -l`, `cat poll.last.log`; `settings_invalid:<key>` → fix the conf; `check_error` → run `python3 <bin>/lib/usage_pause.py check --state-dir ~/.hos` by hand; `read_failed:envelope_invalid` → `cat last-raw`, check the forced command (item 2).
 
@@ -724,7 +726,7 @@ Steps: `load_settings(<conf>)` → `read_reading(DIR/usage-pause/reading)` → c
 
 ### 4.4 The bash block — contract (steps G1–G5)
 
-- **G1. Bound.** `_UP_BOUND=()`; if `timeout` exists `_UP_BOUND=(timeout --kill-after=5 60)`, else if `gtimeout` exists `_UP_BOUND=(gtimeout --kill-after=5 60)`. Every expansion is written `${_UP_BOUND[@]+"${_UP_BOUND[@]}"}` (bash 3.2 `set -u` safety; unchanged from Architect round 1). Not a `_TIMEOUT_BIN=` assignment. **No `mkdir`, `touch`, redirect or any write under `$_HOS_DIR/usage-pause/`** (A2-2).
+- **G1. Bound.** **Architect round 2:** the block's first statements after the sentinel are the two named values `_UP_CHECK_TIMEOUT_S=60` and `_UP_CHECK_KILL_AFTER_S=5`, each with a one-line comment; they are the only numeric literals in the block other than `0`/`1` (S2-ST5 asserts this). *Reason:* D19 asks for named values at the top. These are time bounds on the helper, not usage thresholds, but the bare `5 60` was the only unnamed number left on the decision path. Then `_UP_BOUND=()`; if `timeout` exists `_UP_BOUND=(timeout --kill-after="$_UP_CHECK_KILL_AFTER_S" "$_UP_CHECK_TIMEOUT_S")`, else if `gtimeout` exists the same with `gtimeout`. Every expansion is written `${_UP_BOUND[@]+"${_UP_BOUND[@]}"}` (bash 3.2 `set -u` safety; unchanged from Architect round 1). Not a `_TIMEOUT_BIN=` assignment. **No `mkdir`, `touch`, redirect or any write under `$_HOS_DIR/usage-pause/`** (A2-2).
 - **G2. Ask.** Inside an `if` (so `set -e` cannot fire), `_UP_LINE="$(${_UP_BOUND[@]+"${_UP_BOUND[@]}"} python3 "$_HOS_CRON_DIR/lib/usage_pause.py" check --state-dir "$_HOS_DIR")"`, recording `rc`. Python's stderr goes to the cron log. Match `_UP_LINE` against §4.3's ERE inside a helper function whose first statement is `local LC_ALL=C`. **Also reject** a match whose `decision`/`class` pair is inconsistent (`run` with a class other than `ok`/`failopen`, or `pause` with `ok`/`failopen`).
   - **If `rc≠0`, no match, or inconsistent:** synthesize `decision=pause`, `reason=check_error`, all other fields `-`. **The pause stands regardless of `fail_mode`** (AD-7.5). A missing `python3` or `bin/lib/usage_pause.py` lands here.
 - **G3. Log — exactly one line per gated cycle** (A2-5):
@@ -743,6 +745,7 @@ Steps: `load_settings(<conf>)` → `read_reading(DIR/usage-pause/reading)` → c
 A consumer host with the gate and no poller pauses every cycle with `[PAUSED-USAGE] reading_missing` (or `poller_not_installed` when reading, conf and key are all absent). No issue, no off switch. `fail_mode=open` runs every cycle with `[USAGE-UNCHECKED] fail_mode=open reading_missing`. The release-note and upgrade-checklist text (TD-O-19):
 - `docs/UPGRADE-PR-REVIEW-CHECKLIST.md`, new section **H. Usage-pause gate (#1944)**: three checkboxes: (1) the poller is set up per CRON-SETUP §2a and `--check` is green **before** the upgrade PR merges, or every cycle pauses; (2) after merge, `--check` item 8 is green for every scheduled `hos-cron` copy; (3) API-key-billed: `fail_mode=open` is the only route and means **no usage protection**.
 - `docs/releases/v0.7.0.md`, section "Upgrade notes": the same three facts in prose.
+- **Architect round 2 (TD-O-19).** The target is v0.7.0: `hos_target_release=v0.7.0` in the human's `projects.conf`, no `v0.7.0` tag exists, and `docs/releases/v0.7.0.md` does not exist yet (S2 creates it). **Retarget rule:** if `v0.7.0` is tagged before S2 merges, the S2 PR moves the paragraph and S2-ST9's path to the release file for the then-current `hos_target_release`. code-reviewer checks this at S2 review time. #1944 has no milestone; the orchestrating session should put it on the v0.7.0 milestone (a tracker action, not a design change).
 
 ### 4.6 ~~`_usage_pause_visibility`, dedup, lock, transitions~~ — Removed by Revision 2 (ADR A2-5, D7)
 
@@ -1200,6 +1203,7 @@ Tests:
 - `test_poll_emits_no_audit` (FR-34).
 - `test_last_raw_success_then_failure` — after a success then an `unparseable` poll, `last-raw` bytes after line 1 equal the second poll's raw stdout; exactly one `last-raw` (AC-40, TD-O-16).
 - `test_last_raw_transport_failure_holds_stderr_tail`.
+- `test_last_raw_no_read_header_only` — **Architect round 2:** a success poll, then a key-missing poll → `last-raw` is the header only, `read=none … bytes=0`, and none of the first poll's bytes remain (A2-11).
 - `test_last_raw_unwritable_reading_identical` (isolation, FR-54).
 - `test_check_all_pass` (FR-48); `test_check_idempotent_writes_nothing` (AC-22); `test_check_missing_key_fails_nonzero` (AC-22); `test_check_key_mode_0644_fails`.
 - `test_check_authorized_keys_exact_pass`; `test_check_restrict_option_fails` (AC-15 c); `test_check_command_mismatch_fails`; `test_check_two_lines_fail`.
@@ -1273,7 +1277,7 @@ Tests:
 - `S2-ST2 test_gate_placement` — begin anchor after `_audit()`'s closing `}` and before `# ── Audit log sync`, `get_app_token.sh`, `_CLAUDE_AUTH_ENV=`, `_pre_jitter_deps_check` invocation, and the wakeup section (A2-4).
 - `S2-ST3 test_reactive_breaker_code_unchanged` — unchanged from Revision 1 (AC-17, FR-40).
 - `S2-ST4 test_check_invoked_once`.
-- `S2-ST5 test_up_bound_expansions_set_u_safe`.
+- `S2-ST5 test_up_bound_expansions_set_u_safe`; **Architect round 2:** also asserts `_UP_CHECK_TIMEOUT_S=`/`_UP_CHECK_KILL_AFTER_S=` are defined once at the top of the block and that no other numeric literal except `0`/`1` appears in the block (D19).
 - `S2-ST6 test_gate_never_reads_max_seconds` — no `HOS_CRON_MAX_SECONDS` in the block or the module (A2-17).
 - `S2-ST7 test_sentinel_unique_and_second_line` (A2-4).
 - `S2-ST8 test_check_never_reads_poll_keys` — no element of `CHECK_READ_KEYS` starts with `poll_`; the AST of `evaluate_cycle` and the `check` command handler contains no string constant starting with `poll_`; the gate block contains no `poll_` (A2-3).
@@ -1504,6 +1508,42 @@ Tests:
 - **TD-O-22 (AC-35 interpretation).** On running cycles (fail-open, resume) `hos-cron`'s ordinary flow makes GitHub calls by design. AC-35 is therefore asserted as "zero calls of any kind on paused cycles" plus "the gate adds zero calls on running cycles" (call list identical to a plain run). *Interim:* binds.
 
 **No A2 decision is contradictory.** Two are unimplementable as literally worded (TD-O-12, TD-O-13), and each has a faithful interim. S2 is additionally gated on H-1 by A2-20 (§4.4 G4).
+
+### 11.3 Architect round 2 — rulings (2026-10-03, binding)
+
+**Verdict: APPROVED WITH CHANGES.** The changes below are applied inline in this document, tagged "Architect round 2". No further architect round is needed unless the human's H-1 to H-4 answers change a section. ADR Amendment 3 records the ADR-level refinements.
+
+| Item | Ruling | Reason |
+|---|---|---|
+| TD-O-12 | **ACCEPT** the unscoped `absent(hos_claude_usage_poll_timestamp_seconds)`. ADR A3-1. | Alert rules have no dashboard variables, and `$instance` would be env-expanded to an empty string. With one poller, unscoped is exact. A per-host literal would put `faberix` into the rules file, which §6.7 item 8 forbids. Limitation: with several pollers, one host going silent does not fire this rule (§6.8 item 10). It is a worked-example limit, not a contract limit. |
+| TD-O-13 | **ACCEPT** (anchors for whole scalars, plus a header table and static test covering every duration and PromQL range/horizon literal). | A2-13 already names the header table as the fallback. `6h`/`86400` are query windows, not thresholds. D19 applies to thresholds, and every threshold comparison is against a gauge. |
+| TD-O-14 | **ACCEPT**, ADR A3-2. Folding happens once, in `usage_pause.py check`, *before* the 200-char cap; the bash side never re-encodes. | A non-ASCII byte must not turn a correct pause into `check_error`. The reason's purpose is stable greps, and the folding keeps them stable. The raw name survives in the reading file. The gauge label is sanitized anyway (AD-10). |
+| TD-O-15 | **ACCEPT**. | Naming only. |
+| TD-O-16 | **ACCEPT**. pm-agent may reword AC-40 to "the bytes after the header line"; this does not block. | The header is A2-11's. The AC's intent ("the second poll's raw output, nothing else") is what the test asserts. |
+| TD-O-17 | **ACCEPT**, ADR A3-4. | A2-11's "never delete today" and "≤ `history_max_mb`" cannot both hold when one day exceeds the cap. Keeping today's file (the recovery data closest to now) is the correct winner. Only a pathological setting (`history_max_mb=1`) reaches this, so a WARN, not a failure, is enough. |
+| TD-O-18 | **ACCEPT THE GAP. A2-5 stands unchanged** (one `cycle-usage-paused` per paused cycle, no sync on the paused path). ADR A3-5. | See below. |
+| TD-O-19 | **v0.7.0**, with the retarget rule in §4.5. | `projects.conf` has `hos_target_release=v0.7.0`. No `v0.7.0` tag exists, and `docs/releases/v0.7.0.md` does not exist yet. #1944 has **no milestone**. **Recommendation:** the orchestrating session puts #1944 on the v0.7.0 milestone. |
+| TD-O-20 | **ACCEPT** (stricter). | It is the setup-time mirror of `ReadCostNonzero`/`ReadCostUnknown`. A CLI that drops the fields must fail S1 exit, not pass it silently. |
+| TD-O-21 | **ACCEPT**, ADR A3-3. | With a global pause, per-cycle records are only useful if they can be attributed to a project and a cycle. The change is additive, and no decision reads it. |
+| TD-O-22 | **ACCEPT**. pm-agent may reword AC-35 to match; this does not block. | The literal reading ("no GitHub calls on running cycles") would forbid `hos-cron`'s normal work. A2-4's intent is that a paused cycle makes zero network calls and the gate adds none. |
+
+**TD-O-18 in full.** Three options were weighed:
+1. **Sync on the paused path.** Rejected. `_sync_audit_logs` (`:374-427`) does `git fetch` and `git push`. That breaks A2-4/AC-35 (a paused cycle makes zero network calls). It also does network work exactly when the host is supposed to be idle, and makes a paused cycle's cost depend on GitHub's reachability.
+2. **Emit an event only when the pause reason changes**, comparing against the newest `cycle-usage-paused` record on disk. Rejected. In practice this is transition detection with the audit log as its memory, which D6 and A2-5 removed on purpose ("minimise points of failure"). The gate block would have to read files other than through `check` (breaking S2-ST1), and the result would be coupled to `cycle_log`'s on-disk format. The audit content would then depend on earlier audit content, against the spirit of ADR-1604 AD-4. The new failure modes include a corrupt or partial newest record, a month directory thousands of files deep (#1803), and separate clones per role. Each one either suppresses evidence or needs its own fail-safe. Finally, "reason changes" has odd semantics: a percentage creeping from 91% to 92% counts as a change.
+3. **Accept the gap.** Chosen. The records are **delayed, not lost.** `_sync_audit_logs` is a bulk, idempotent catch-up. It pushes every `audit/log/**/*.json` not already on the `audit-log` branch, and it already handles a backlog thousands of files deep (`:411-413`). The first running cycle after the pause pushes them all. Volume is bounded by cron cadence: at the observed ~10-minute cadence, about 144 records per role/project per day. That is fewer per cycle than a running cycle writes. A2-5 already accepted this volume. The up-to-date per-cycle record during a pause is the cron log line, which is unaffected. The gap is not new: it is the existing #1803 sync and commit gap, applied to idle cycles. Fixing it there (for example, a sync that does not need a running cycle) covers both cases. Fixing it here would add state to a stateless gate.
+- **TD change:** runbook §2a.10 gains one sentence (applied). No code change.
+- **For the orchestrating session (not filed by me):** annotate #1803 that paused cycles add records which sync only on resume. After a multi-day pause, the first sync carries roughly 144 × (role/project pairs) × days records in one commit.
+
+**Additional round-2 findings (applied inline):**
+- **R2-A (§1.8, S1-ST10 (c)).** The Revision 2 wording banned every literal `100` outside the settings block. That made it impossible to name §1.3's `*_resets ≤ 100` cap at all. (c) is narrowed to function bodies plus non-`DEFAULT_` module constants; (b) still guarantees D19 for every comparison.
+- **R2-B (§1.6, §3.7 P11, §9.1).** A2-11 says `last-raw` is "overwritten each poll". Revision 2 skipped the overwrite when P6 did not run, which left a stale capture from an earlier poll. Fixed with a header-only `read=none` record and a new test.
+- **R2-C (§4.4 G1, S2-ST5).** The gate's `timeout --kill-after=5 60` were the only unnamed numbers on the decision path. They are now named values at the top of the block (D19 hygiene; these are time bounds, not thresholds).
+
+**Verification performed this round:**
+- **A2-1 to A2-22 faithfulness:** checked section by section. Every A2 item is implemented. The only departures are the ones ruled above (TD-O-12, -14, -17, -21, each recorded in ADR A3) and R2-B, which brings the TD *into* line with A2-11.
+- **S1/S2 have no TBDs.** The only open items are human gates: H-1 governs S2's G4 second branch, and both branches are fully specified. S1's exit records are human actions (H-6).
+- **Traceability:** every FR and AC ID in the requirements (119 IDs) has a §10 row, checked mechanically. Superseded IDs are marked.
+- **D19 (no literal thresholds):** no PromQL in §6.3 or §6.5 compares against a configurable value except through a gauge (`threshold_percent{limit}`, `staleness_seconds`, `sync_stale_after_seconds`). The only literals in comparisons are the `0`/`1` semantic constants. Range/horizon literals (`6h`, `86400`; on the dashboard, `1h`/`3600`) are query windows and are listed in the header table for the rules file. Dashboard threshold steps carry no value. No `90` appears.
 
 ---
 
