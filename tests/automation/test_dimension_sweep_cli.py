@@ -1044,6 +1044,55 @@ def test_T6_23_report_exact_aggregation(tmp_path, capsys):
     assert sweep.main(["report", "--since", "yesterday"], repo_root=root) == 2
 
 
+def test_T6_23b_measured_preflight_document_is_not_a_launched_run(tmp_path, capsys):
+    # A preflight document is recorded `measured` but never launched a model session
+    # (launched False, outcome_detail null). It counts as a run and a measured outcome,
+    # and must contribute to no launched-denominator statistic.
+    root = tmp_path / "preflight"
+    sweep._write(
+        _fixture_result(
+            "pre",
+            "2026-10-01T00:00:01Z",
+            launched=False,
+            outcome="invocation_failed",
+            outcome_detail=None,
+            duration_ms=999,
+            total_cost_usd=9.0,
+            num_turns=99,
+            matched_lines_changed=77,
+            payload_extractable=True,
+            permission_denied_tools=["Write"],
+            cli_version="9.9.9",
+        ),
+        root,
+    )
+    sweep._write(
+        _fixture_result(
+            "real",
+            "2026-10-01T00:00:02Z",
+            launched=True,
+            outcome="completed",
+            duration_ms=100,
+            total_cost_usd=0.1,
+            num_turns=3,
+            matched_lines_changed=10,
+        ),
+        root,
+    )
+    assert sweep.main(["report"], repo_root=root) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["runs"] == 2 and report["by_runner_outcome"] == {"measured": 2}
+    assert report["launched"] == 1
+    assert report["by_outcome_detail"] == {"null": 1}
+    assert report["terminal_reason_evaluated"] == 1
+    assert report["payload_extractable_count"] == 0
+    assert report["by_permission_denied_tool"] == {}
+    assert report["duration_ms"] == {"n": 1, "min": 100, "p50": 100, "p90": 100, "max": 100}
+    assert report["total_cost_usd"]["n"] == 1 and report["total_cost_usd"]["sum"] == 0.1
+    assert report["num_turns"]["n"] == 1
+    assert report["matched_lines_changed"]["n"] == 1
+
+
 def test_T6_24_report_empty_and_malformed(tmp_path, capsys):
     root = tmp_path / "empty"
     root.mkdir()
