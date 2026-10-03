@@ -100,8 +100,6 @@ _USAGE_KEYS = (
     "cache_read_input_tokens",
     "output_tokens",
 )
-# Mirrors agent_invoke_cli's private blocking-severity set (diagnostic count only).
-_BLOCKING_SEVERITIES = frozenset({"critical", "high", "blocking"})
 _PRE_EVALUATION_DETAILS = frozenset({"timeout", "unparseable", "envelope_shape_violation"})
 _SINCE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -321,16 +319,17 @@ def _run_primitive(argv: list[str], *, timeout_s: int) -> tuple[int, bytes, byte
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
-    for sig, wait_s in ((signal.SIGTERM, _KILL_GRACE_S), (signal.SIGKILL, None)):
+    """SIGTERM the group, wait out the grace, then ALWAYS SIGKILL the whole group (TD §G.13
+    item 6): the leader exiting early must not spare a member that ignores SIGTERM."""
+    for sig, wait_s in ((signal.SIGTERM, _KILL_GRACE_S), (signal.SIGKILL, _KILL_GRACE_S)):
         try:
             os.killpg(proc.pid, sig)
         except ProcessLookupError:
             pass
         try:
             proc.communicate(timeout=wait_s)
-            return
         except subprocess.TimeoutExpired:
-            continue
+            pass
 
 
 class _Lock:
@@ -443,7 +442,7 @@ def _ingest_document(rec: dict, doc: dict) -> None:
         blocking_findings_count=sum(
             1
             for f in findings
-            if str(_as_dict(f).get("severity", "")).lower() in _BLOCKING_SEVERITIES
+            if str(_as_dict(f).get("severity", "")).lower() in aic.blocking_severities
         ),
         duration_ms=aic.bounded_audit_number(inv.get("duration_ms")),
         timeout_seconds=aic.bounded_audit_number(inv.get("timeout_seconds")),
@@ -686,17 +685,14 @@ def _launch(
             _write(start, root)
         except Exception as exc:  # noqa: BLE001 — never launch without a durable start record
             sys.stderr.write(f"dimension_sweep: record not written: {_one_line(str(exc))}\n")
-            raise _Fail("interrupted", "start_record_unwritable", str(exc)) from None
+            raise _Fail("audit_unwritable", "start_record_unwritable", str(exc)) from None
     began = time.monotonic()
     try:
-        rc, out, err = _run_primitive(argv, timeout_s=_runner_timeout_s(binding.timeout_seconds))
-    except _PrimitiveTimeout:
-        rec["runner_wall_ms"] = int((time.monotonic() - began) * 1000)
-        rec["launched"] = is_launch
-        raise _Fail(
-            "runner_timeout", None, "the primitive exceeded the runner wall clock"
-        ) from None
+        _observe(args, rec, argv, binding, digest, began, is_launch=is_launch)
+    except _Fail:
+        raise
     except BaseException as exc:
+        # §G.6: SIGINT or any other exception after the start record — record it, re-raise.
         rec.update(
             runner_outcome="interrupted",
             error_code=type(exc).__name__,
@@ -709,6 +705,27 @@ def _launch(
         except Exception:  # noqa: BLE001 — best effort while already unwinding
             pass
         raise
+
+
+def _observe(
+    args: argparse.Namespace,
+    rec: dict,
+    argv: list[str],
+    binding: dr.Binding,
+    digest: str | None,
+    began: float,
+    *,
+    is_launch: bool,
+) -> None:
+    """Seam call and document ingestion. Raises _Fail on any no-document path."""
+    try:
+        rc, out, err = _run_primitive(argv, timeout_s=_runner_timeout_s(binding.timeout_seconds))
+    except _PrimitiveTimeout:
+        rec["runner_wall_ms"] = int((time.monotonic() - began) * 1000)
+        rec["launched"] = is_launch
+        raise _Fail(
+            "runner_timeout", None, "the primitive exceeded the runner wall clock"
+        ) from None
     rec["runner_wall_ms"] = int((time.monotonic() - began) * 1000)
     rec["primitive_exit_code"] = rc
     if err:

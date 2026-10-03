@@ -1024,6 +1024,7 @@ matched_files_digest = _matched_files_digest
 bounded_audit_str = _bounded_audit_str
 bounded_audit_number = _bounded_audit_number
 extract_payload = _extract_payload
+blocking_severities = _BLOCKING_SEVERITIES
 
 
 def _write_audit_event(

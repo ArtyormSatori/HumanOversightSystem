@@ -485,21 +485,28 @@ def test_T6_12_runner_timeout_kills_process_group(repo, monkeypatch, capsys, tmp
     pidfile = tmp_path / "pid"
     stub = repo / "bootstrap" / "invoke_agent.sh"
     stub.parent.mkdir(exist_ok=True)
-    stub.write_text(f"#!/bin/bash\necho $$ > {pidfile}\nsleep 60\n")
+    # A detached background member that ignores SIGTERM: only an unconditional group
+    # SIGKILL (TD §G.13 item 6) removes it once the leader has exited.
+    stub.write_text(
+        f"#!/bin/bash\necho $$ > {pidfile}\n"
+        "(trap '' TERM; exec sleep 60) >/dev/null 2>&1 </dev/null &\n"
+        "sleep 60\n"
+    )
     monkeypatch.setattr(sweep, "_RUNNER_TIMEOUT_OVERRIDE_S", 1)
+    monkeypatch.setattr(sweep, "_KILL_GRACE_S", 1)
     began = time.monotonic()
     rc, _, _ = measure(repo, capsys)
     assert time.monotonic() - began < 5
     assert rc == 1 and result_of(repo)["runner_outcome"] == "runner_timeout"
-    pid = int(pidfile.read_text())
+    pgid = int(pidfile.read_text())
     for _ in range(40):
         try:
-            os.kill(pid, 0)
+            os.killpg(pgid, 0)
         except ProcessLookupError:
             break
         time.sleep(0.05)
     else:
-        pytest.fail("the wrapper process survived the runner timeout")
+        pytest.fail("a process-group member survived the runner timeout")
 
 
 def test_T6_13_registry_error(repo, monkeypatch, capsys):
@@ -677,6 +684,25 @@ def test_T6_20_durability_and_abandoned(repo, monkeypatch, capsys, tmp_path):
     sweep._write(start, root)
     assert sweep.main(["report"], repo_root=root) == 0
     assert json.loads(capsys.readouterr().out)["abandoned"] == 1
+
+
+def test_T6_20b_unwritable_start_record(repo, monkeypatch, capsys):
+    seam = install(monkeypatch, Seam())
+    real_write = sweep._write
+
+    def failing_write(event, root):
+        if event["event"] == sweep.EVENT_START:
+            raise OSError("read-only")
+        return real_write(event, root)
+
+    monkeypatch.setattr(sweep, "_write", failing_write)
+    rc, out, err = measure(repo, capsys)
+    result = json.loads(out)
+    assert rc == 1 and not seam.calls
+    assert result["runner_outcome"] == "audit_unwritable"
+    assert result["error_code"] == "start_record_unwritable" and result["launched"] is False
+    assert any(line.startswith("dimension_sweep: record not written:") for line in err.splitlines())
+    assert _records(repo, sweep.EVENT_RESULT) == [result]
 
 
 def test_T6_21_unwritable_result_record(repo, monkeypatch, capsys):
@@ -967,6 +993,7 @@ def test_T6_28_lock_and_aliases(repo, tmp_path, monkeypatch, capsys):
     assert aic.bounded_audit_str is aic._bounded_audit_str
     assert aic.bounded_audit_number is aic._bounded_audit_number
     assert aic.extract_payload is aic._extract_payload
+    assert aic.blocking_severities is aic._BLOCKING_SEVERITIES
 
     seam = install(monkeypatch, Seam())
     common = Path(_git(repo, "rev-parse", "--git-common-dir"))
