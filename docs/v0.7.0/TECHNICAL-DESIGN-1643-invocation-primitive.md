@@ -48,7 +48,14 @@ below is designed to be implementable without further design questions.
 
 > **AMENDED 2026-10-02 — Amendment D (W5b: registry data, prompt-file contract, T5.28). Binding on W5b; architect-approved with edits, round 1 (§D.10). Where it and §4.1/§7/§9.5 or Amendment C disagree, Amendment D governs.**
 
-**Date:** 2026-09-14 (original), amended 2026-09-16 (Amendment A), 2026-09-18 (Amendment B), 2026-10-02 (Amendment C)
+> **AMENDED 2026-10-03 — Amendment E (registry loader hardening before W5c: #1932 tool trust, #1931
+> regex bounds, #1937 duplicate keys / core integrity). Architect-approved with edits, round 1 (§E.12).
+> Binding on the hardening slice; W5c may not execute a binding until it has merged. W7 may not merge
+> until ARCH-ESC-E1 and ARCH-ESC-E2 (§E.12) are cleared by the human.** Adds rules
+> L29–L33 and plan rule PL1, a CORE `tools:` allowlist, and a `.hos-manifest` drift check, and
+> supersedes TD-D28's order lists (§E.5). Where it and Amendment C or D disagree, Amendment E governs.
+
+**Date:** 2026-09-14 (original), amended 2026-09-16 (Amendment A), 2026-09-18 (Amendment B), 2026-10-02 (Amendments C, D), 2026-10-03 (Amendment E)
 **Iteration:** 1 of 5
 **Author:** technical-design
 **Binding inputs:** `docs/v0.7.0/ADR-1643-deterministic-agent-invocation.md` (AD-1…AD-16 BINDING);
@@ -4254,3 +4261,746 @@ constrained to edit this one file only.
 **Not done here:** no data file, prompt, test or script was written into the repository. The §D.1 probe
 ran in `/tmp/claude/w5b/` only. No issue was filed, no label was created, and no register entry was
 written.
+
+---
+
+## Amendment E (2026-10-03) — registry loader hardening before W5c: tool trust (#1932), regex bounds (#1931), duplicate keys / core integrity (#1937)
+
+**Status:** **Amendment E — architect-approved with edits, round 1 (§E.12).** W5a (#1933) and W5b (#1943) have
+merged (`main` at `ba1e67b97`). W5c (the sweep that **executes** resolved deterministic bindings, the
+installer, and the ship-list) is not designed here. It may not merge until this amendment's slice has
+merged, because #1932 has to be closed before any binding is executed. Where this amendment and
+Amendment C or D disagree, this amendment governs. Everything it does not name stands.
+
+**Numbering.** TD-VF-28…TD-VF-32, TD-D42…TD-D49, rules **L29–L33**, plan rule **PL1**, tests
+**T5.54…T5.64**.
+
+### E.1 Verification findings — TD-VF-28…TD-VF-32 (tree at `ba1e67b97`)
+
+**TD-VF-28 — L11 trusts every executable, and a CORE tool is not on a protected surface.**
+- L11 checks only `is_file()` and `os.access(X_OK)` (`dimension_registry.py:577-587`). The digest covers
+  the `tool` **string** (`_body`, `:694`), not the bytes behind it.
+- The shipped data names **11 distinct tools**: nine in `core.yaml:151-199`, plus
+  `packs/django/dimensions.yaml:57` and `packs/astro/dimensions.yaml:46`. Ten of them sit under
+  `scripts/oversight/gates/`, which is protected (`protected_surfaces.txt:29`).
+  `scripts/run_second_review.sh` (`core.yaml:199`) matches **no** protected glob (`:16-47`).
+- `scripts/oversight/gates/expensive_gates_stub.sh` is `100755` in a protected directory but is a stub
+  (TD-VF-25). It is not a control.
+- `scripts/automation/**` is **not** protected. In HOS's own repo, engine code is less protected than
+  `contract/**` (`:17`).
+- No deterministic binding exists in HOS `project.yaml` or in the template example (grep of `tool:`).
+
+**TD-VF-29 — predicate cost is polynomial in the number of quantifiers, not only exponential under
+nesting.**
+- L14 only compiles each pattern (`:537-545`). `resolve_for_diff` recompiles every pattern and calls
+  `search` on every changed path (`:724-729`).
+- Measured on CPython 3.14.4 against `"a"*n`. With **one** quantifier, `.*x` takes 0.4 ms at n=1024 and
+  5.4 ms at n=4096. With **two**, `a*a*b`, `.*.*x` and `[^/]*[^/]*x` each take 0.12 s at n=1024 and
+  **7.4 s** at n=4096. With **three**, `a*a*a*b` exceeds 20 s at n=1024. None of these has a nested
+  group, so a denylist of "nested quantifiers" would miss all of them.
+- I probed all 96 shipped and template patterns (`core.yaml`, HOS `project.yaml`, both pack files, and
+  the template example). **Each has at most one quantifier.** All of them use only: literals, `\` plus
+  punctuation, `\b`, `.`, `[…]`/`[^…]` classes, a leading `^`, a trailing `$`, and a leading `(?i)`.
+
+**TD-VF-30 — PyYAML can detect duplicates exactly, but only after the parse.** Probed on PyYAML 6.0.3,
+the version in the venv.
+- `safe_load` composes the **whole** node graph before it constructs anything. As a result, a syntax
+  error anywhere in the file is raised before any duplicate key can be seen.
+- A `SafeLoader` subclass whose mapping constructor first calls `flatten_mapping` and then checks the
+  constructed keys rejects a duplicated top-level key, a duplicated nested key (`{p: 1, p: 2}`), and a
+  key supplied both by a `<<:` merge and explicitly.
+- TD-D41's placement "before L3a" is therefore not literally achievable. §E.5 corrects it.
+
+**TD-VF-31 — `.hos-manifest` carries content hashes; `.hos-release` marks an installed tree.**
+- `enumerate_framework_files` emits `<path>\tWHOLE\t<sha256>` from the **source** bytes
+  (`hos_install.sh:2205-2225`). `cp_framework_file` is a plain `cp` (`:615-626`), so a verbatim copy's
+  installed bytes hash to its row.
+- TD-D32 rows (W5c) carry the **target** sha for `pack-<n>.yaml` and `resolved-packs.txt`.
+- `.hos-release` is written last, after the manifest, as the commit point (`:2186-2189`, `:2408-2416`).
+- Neither file exists in HOS's own repo, and neither is tracked there.
+- `.hos-release` is protected (`protected_surfaces.txt:47`). `.hos-manifest` is not.
+- The canonical row parser is `regions.parse_manifest_line` (`regions.py:1103-1119`). `regions.py`
+  imports `argparse` at module scope (`:47`), so the L1 loader may not import it (§C.2.7, TD-VF-20).
+
+**TD-VF-32 — no consumer has a manifest row for registry data yet.**
+- `framework_consumer_files.txt` has no `contract/dimensions/` line. W5c item 1 adds it (§C.2.11).
+- Pack-file rows arrive with W5c's TD-D32.
+- The loader does not reach consumers until W7 (ESC-E). The drift rule (TD-D48) can therefore land now
+  without breaking any consumer.
+
+### E.2 Tool trust — #1932 (TD-D42, TD-D43)
+
+**TD-D42 — a deterministic binding in any layer may name only a tool listed in CORE's `tools:`.**
+`core.yaml` gains a **core-only** top-level key, `tools:`. It is a list of repo-relative paths, and it
+is the complete set of control entry points. `KINDS[DIMENSIONS_SCHEMA]` adds `"tools"` to
+`top_level_keys["core"]` and to `core_only_keys`, so a `tools:` in a pack or project file fails L5
+(`core_only_key`). The `KindSpec` shape is unchanged. The literal goes between `entries:` and
+`bindings:`, sorted in codepoint order:
+
+```yaml
+# Trusted control entry points (ADR-1643 TD-D42). A deterministic binding in ANY layer may
+# name only a path listed here. Listing a path is a CORE (contract/**) change.
+tools:
+  - scripts/oversight/gates/astro_check.sh
+  - scripts/oversight/gates/bash_check.sh
+  - scripts/oversight/gates/collection_integrity.sh
+  - scripts/oversight/gates/django_check.sh
+  - scripts/oversight/gates/lint_check.sh
+  - scripts/oversight/gates/portability_check.sh
+  - scripts/oversight/gates/secret_scan.sh
+  - scripts/oversight/gates/security_scan.sh
+  - scripts/oversight/gates/template_refs_check.sh
+  - scripts/oversight/gates/type_check.sh
+  - scripts/run_second_review.sh
+```
+
+CORE lists `django_check` and `astro_check` even though only packs bind them. That is correct: every
+gate ships in `scripts/oversight/` to every consumer (TD-VF-25), so the list describes what is
+shipped, not which pack is installed.
+
+**Rules (exact):**
+- **L32 `tool_untrusted` (new, dim-specific).** A `deterministic` binding whose `tool` is a string,
+  where that string is **not exactly equal** to an entry of `tools:`.
+  - The comparison is exact string equality. There is no normalisation, so `./scripts/…` or
+    `scripts//…` fails.
+  - An absent `tools:` key means an empty list.
+  - Suppressed bindings are checked too, as every rule already does.
+  - A non-string or absent `tool` remains L11.
+- **L28 (extended).** `tools:` must be a list. Each item must be a non-empty string in POSIX normal form
+  (`PurePosixPath(p).as_posix() == p`, and no `.` segment). Otherwise the error is `unknown_item_key`.
+- **L6 (extended).** A repeated `tools:` path is `duplicate_id`.
+- **L27 (extended).** Each `tools:` entry gets the same path-escape check as `tool`.
+- **L11 (extended).** Each `tools:` entry must be a regular, executable file **even if no binding
+  names it**. The loop runs over bindings first, as today, then over the remaining entries.
+
+**Rejected alternatives:**
+- **(1) A protected-directory prefix rule in the engine.**
+  - It hardcodes HOS's layout into engine code, and that code lives on the *unprotected*
+    `scripts/automation/**` (TD-VF-28).
+  - It admits every executable in the directory, including `expensive_gates_stub.sh`.
+  - It turns "add a script to `gates/`" into "add a control" implicitly.
+- **(3) Requiring every `tool` to match `protected_surfaces.txt`.**
+  - It rejects CORE's own `run_second_review.sh` today.
+  - "Protected" does not mean "control". `bootstrap/**` and `bin/**` are protected (`:26-27`), so
+    `bootstrap/submit_pr.sh` would load as a review control. That is #1932's threat at a smaller scale.
+  - It ties load results to a file #1935 is reclassifying, so a reclassification would silently change
+    which bindings load.
+  - It would add a third glob matcher, where two already disagree: `require_human_approval.glob_to_regex`
+    and `merge_authority`'s `fnmatch`.
+- **A pack/project tool must equal some CORE binding's tool.** This fails for `django_check` and
+  `astro_check`, which no CORE binding names.
+
+**Why it holds under each #1939 answer.** The allowlist lives in `contract/dimensions/core.yaml`. That
+file is protected in HOS (`contract/**`), and it is protected in consumers through the shipped
+CODEOWNERS and through L31 (TD-D48). Its protection therefore never depends on `packs/**`.
+- **(a)** `packs/**` protected, or **(b)** `packs/*/dimensions.yaml` protected: pack binding edits
+  become human-gated as well. Amendment E is unchanged.
+- **(c)** No change: a HOS-source pack edit can still merge without a human. But it can only bind a
+  CORE-listed tool (L32), only with bounded predicates (L33), and it can still never suppress or remove
+  a CORE binding (L16). What remains is a pack narrowing or widening its *own* routing. That is #1939's
+  actual question, and Amendment E does not touch it.
+- **Every answer:** in consumers, L31 also detects any post-install edit to `pack-*.yaml`.
+
+**The protected status of each tool's code is test-pinned, not a load rule.** T5.63 asserts that every
+`tools:` entry under `scripts/oversight/gates/` matches `protected_surfaces.txt`, using
+`require_human_approval.py`'s own matcher. It also asserts that the set of unprotected entries is
+**exactly** `{scripts/run_second_review.sh}`. That is a ratchet: the test fails once #1935 protects the
+script, which forces the exemption to be deleted. Protecting the script is a `protected_surfaces.txt`
+change, so it is #1935's decision and not this amendment's (§E.10 Q2).
+
+**TD-D43 — the digest covers the allowlist, and W5c records what it ran (#1932 option 4).**
+- `ResolvedRegistry` gains `tools: tuple[str, ...]`, sorted, from `core.yaml`.
+- `_body` gains `"tools": [...]`, so `digest` and `to_json` cover it. This is an additive JSON key.
+- After L32, `Binding.tool` is byte-equal to an allowlist entry, so the path string already in the
+  digest is canonical.
+- **W5c obligations (recorded, not designed):**
+  - (i) Execute only `Binding.tool` from a `ResolvedRegistry` that was loaded in the same process.
+  - (ii) Pass `[root / tool, …]` as an argv list, never a shell string.
+  - (iii) For each executed binding, emit `tool` and `tool_sha256`. The sha256 is over the bytes read
+    immediately before exec, so the audit names the code that ran and not only its path. The residual
+    TOCTOU window is accepted and named.
+
+### E.3 Predicate bounds — #1931 (TD-D44, TD-D45)
+
+**TD-D44 — L33 `unsafe_pattern` (new, dim-specific): every predicate pattern must be in a closed,
+single-quantifier subset.** Patterns are checked after L14 has compiled them:
+
+```
+pattern  := ["(?i)"] ["^"] piece* ["$"]        ; ≤ 256 characters in total
+piece    := "\b" | atom [quant]                ; "\b" is never quantified
+atom     := literal | escape | "." | class
+literal  := any char except  . ^ $ * + ? { } [ ] \ | ( )
+escape   := "\" (ASCII punctuation | "d" | "w" | "s")
+class    := "[" ["^"] citem+ "]"               ; no nested "[", "]" never first
+citem    := any char except \ [ ]  |  "\" ASCII punctuation
+quant    := "*" | "+" | "?"                    ; AT MOST ONE quant in the whole pattern
+tail     := the pieces after the quantified atom, excluding a trailing "$"   ; AT MOST 16 pieces
+                                                ; ("\b" counts as a piece) (architect, round 1)
+```
+
+- The subset has no groups other than the leading flag, no alternation, no `{m,n}`, no lazy or
+  possessive forms, no backreferences, and no lookarounds.
+- `^` may appear only at the start, after an optional flag. `$` may appear only at the end.
+- The scanner is hand-written in the standard library. It must **not** use `re._parser`/`sre_parse`,
+  which are private and version-sensitive (3.11 renamed one, deprecated the other).
+- **Cost bound (architect, round 1 — the draft's figure was wrong):** with one quantified atom, one
+  `search` costs O(L²·t), where L is the path length and t is the length of the **tail**, the fixed
+  remainder after the quantified atom. The prefix before the atom does not change the shape (measured).
+  The draft's "about 5 ms per pair at L=4096" was `.*x`, which has t=1. It was **not** the worst
+  admissible shape. Under the draft's grammar, `(?i).*` followed by 250 literals is 256 characters with
+  one quantifier, and it measured **4.5 s per pair** at L=4096 (CPython 3.14.4, `"a"*4096`). Even plain
+  `(?i).*x` measured 33 ms, because `(?i)` costs about 6× here. Two bounds therefore bind together:
+  - **tail ≤ 16 pieces** (the grammar's `tail` line). The longest shipped tail is `\.html`, at 5
+    pieces.
+  - **PL1 at 1024 bytes**, not 4096 (TD-D45).
+
+  The measured worst admissible shape, `(?i).*` + 15×`a` + `b` against `"a"*1024`, takes **about
+  20 ms per pair**. Total plan cost is linear in files × patterns, with that per-pair ceiling. The
+  bound still describes cost, not a timeout: it removes the unbounded case, and it does not make a
+  10⁴-file adversarial diff free.
+- All 96 shipped and template patterns are in the subset (TD-VF-29). The real-data loads T5.49, T5.50
+  and T5.53 keep that true, with no new data test.
+- Consumers lose alternation and multi-quantifier forms. `^src/.*\.tsx?$` must become two patterns,
+  `^src/.*\.ts$` and `^src/.*\.tsx$`. That is an accepted cost.
+
+**TD-D45 — PL1 `bad_changed_file` (plan-time, not a load rule).** `resolve_for_diff` raises
+`RegistryError("bad_changed_file", …)` for a changed path that is empty, longer than **1024 UTF-8
+bytes**, or contains `\n` or `\x00`. *(architect, round 1: the draft said 4096 (PATH_MAX). 1024 cuts the
+L² term by 16×. No realistic repository path reaches it, and a path that does fails closed with the
+path named. The bound is a consumer-visible failure mode, so it is part of ARCH-ESC-E1.)* Paths are checked in input order and the first bad one
+wins. The CLI's existing `RegistryError` handler turns this into exit 1 with its standard stderr line.
+Without PL1, the bound L depends on the attacker.
+
+**Rejected alternatives:**
+- **(1) A glob grammar.** It would re-pin all 96 patterns and T5.28. `\b` and `(?i)` have no glob
+  equivalent. A closed regex subset is just as safe for far less churn.
+- **(2-as-denylist).** Rejecting "known exponential constructs" misses the polynomial cases (TD-VF-29).
+  A positive grammar is closed by construction.
+- **(3) re2.** A native consumer dependency on hosts with no venv (Amendment A).
+- **(4) A wall-clock timeout.** The loader is pure: no subprocess (§C.2.7), and `signal.alarm` is
+  main-thread-only and POSIX-only. A timeout would also make a data defect's outcome depend on machine
+  speed, which TD-D28's determinism argument forbids. Its path-length half is adopted as PL1.
+- **A length bound alone.** `(a+)+$` is 6 characters.
+
+### E.4 Duplicate keys and core integrity — #1937 (TD-D46, TD-D47, TD-D48)
+
+**TD-D46 — L29 `duplicate_key` (new, generic).** `_parse_layer` uses a strict `SafeLoader` subclass,
+built lazily inside `load_registry` (PyYAML stays a lazy import, §C.2.4).
+- Its mapping constructor calls `flatten_mapping(node)` and then constructs each key. A key equal to
+  an earlier key in the same mapping raises a module-private exception that does **not** derive from
+  `yaml.YAMLError`. `_parse_layer` catches it **before** the `YAMLError` clause and turns it into
+  `duplicate_key`.
+- The message names the key and its 1-based line (`key_node.start_mark.line + 1`). It then delegates to
+  `SafeLoader.construct_mapping`.
+- **Merge keys:** a key supplied by `<<:` and also explicitly is a duplicate. Merge-override is exactly
+  the "hide an earlier value" behaviour L29 exists to forbid. No shipped file uses anchors.
+- It applies at every nesting depth and to every kind. #1644 T3.1 therefore inherits it, which
+  discharges TD-D41's third deadline condition.
+- **Unhashable keys (architect, round 1).** A complex key, such as `? [a, b]`, constructs to an
+  unhashable value. The duplicate check must not raise a bare `TypeError`, which L26 would turn into
+  `kind_handler_failed`. When the constructed key is unhashable, skip the membership test and let the
+  delegated `SafeLoader.construct_mapping` raise its own `ConstructorError`. That is a `YAMLError`, so
+  it surfaces as L3a `bad_schema`. T5.54 adds this case.
+- **Which "parse" precedes L29 (architect, round 1).** PyYAML has two phases. *Compose-phase* errors,
+  from the scanner, parser or composer (syntax errors), are raised for the whole file before any
+  construction, so they always precede L29. *Construct-phase* `YAMLError`s, such as an unhashable key
+  or an unknown tag under `SafeLoader`, are raised during the same document-order walk as L29. Between a
+  duplicate key and a construct-phase error, the one that occurs **earlier in the document** therefore
+  wins. That is still deterministic per input, so TD-D28's argument holds. §E.5 step 2's
+  "L3a (YAML unparseable)" means compose-phase errors only. T5.64's (L3a-parse, L29) fixture must use a
+  syntax error.
+
+**TD-D47 — L30 `core_empty` (new, dim-specific), kept as a floor, not as the closure.** It fires when
+`core.yaml`'s `entries` is absent, `null`, or `[]`. It runs first in handler step 3. A non-list value
+falls through to L28, so L30 never hides a shape error. Per the architect's scope note (§D.10 Q7), L30
+does **not** close the empty-core class: a core trimmed to one entry passes it. The class is closed by
+T5.49 in HOS's own tree, and by L31 in installed trees.
+
+**TD-D48 — L31 `installed_drift` (new, generic): in an installed tree, every HOS-owned registry input
+must match its `.hos-manifest` row.**
+- **Applies when** anything exists at `<root>/.hos-release`, tested with `os.path.lexists`, so a
+  dangling symlink counts.
+  - It is otherwise skipped. That covers HOS's own repo and every W5a/W5b tmp-tree test (TD-VF-31).
+  - Deleting `.hos-release` to evade the check is a protected-surface edit (`protected_surfaces.txt:47`).
+- **Checked set, in order:**
+  1. `contract/resolved-packs.txt`, only when `packs=None`;
+  2. `<directory>/core.yaml`;
+  3. for each slug in the pack set, in closure order, `<directory>/pack-<slug>.yaml` **when the file
+     exists or `.hos-manifest` has a row for it** *(architect, round 1)*.
+
+  *(architect, round 1)* The draft checked only files "that will be loaded". The engine loads a pack
+  file only if it exists (`dimension_registry.py:271`), so **deleting** an installed `pack-django.yaml`
+  silently dropped that pack's bindings and passed L31. A row with no file is now `installed_drift`,
+  with the message "listed in `.hos-manifest` but absent". A pack that ships no dimensions file, such as
+  `node`, has neither a file nor a row, so it is skipped. That is still TD-D37's designed non-error.
+
+  `project.yaml` is consumer-owned and is never checked.
+- **Per path, first failure wins.** Each of these is `installed_drift`, carrying that path:
+  - `.hos-manifest` absent, unreadable, or not UTF-8;
+  - no row for the path;
+  - more than one row for the path;
+  - a row that is not WHOLE;
+  - a sha that does not match `^[0-9a-f]{64}$`;
+  - a sha that differs from sha256 of the file's raw bytes.
+- **Message:** names the path and says *re-run `bootstrap/hos_install.sh`; put local changes in
+  `contract/dimensions/project.yaml`*.
+- **Row lookup** is a private, about 15-line reader in the engine, because `regions.py` is not
+  importable from L1 (TD-VF-31).
+  - It splits on `\n`, and skips blank **and whitespace-only** lines, and lines whose `lstrip()` starts
+    with `#`. *(architect, round 1: whitespace-only is what `parse_manifest_line` treats as blank, at
+    `regions.py:1112`. T5.57 adds a whitespace-only line.)*
+  - It considers only lines whose first tab field equals the path. A 3-field row must have field 2 equal
+    to `WHOLE`. A 2-field row is v1 WHOLE.
+  - Malformed rows for *other* paths are ignored.
+  - T5.57 pins parity with `regions.parse_manifest_line` (D41: one meaning, pinned, not a second
+    definition left to drift).
+- **What it is and is not.** It is an **integrity** control. It catches hand edits, a half-applied
+  upgrade (core copied, `.hos-release` from the prior run), and a trimmed core. It is **not**
+  tamper-proof: `.hos-manifest` is unprotected (TD-VF-31), so an actor who can merge to `contract/**`
+  can also rewrite the row. Tamper resistance still rests on CODEOWNERS over `contract/**`. Whether to
+  protect `.hos-manifest` is routed to #1935 (§E.10 Q2).
+- **Rejected:**
+  - **An engine-pinned hash of the release's `core.yaml`.** It is circular: the engine ships in the same
+    release and sits on an unprotected path.
+  - **Warn-only on drift.** A loader that gates review must not run on a core that differs from the
+    release, silently or not. `core.yaml` is declared HOS-owned and overwritten on upgrade
+    (`core.yaml:1`), so drift has no legitimate use.
+
+### E.5 Rule table delta and the amended order (supersedes TD-D28's three lists)
+
+| # | Class | Condition | `RegistryError.code` |
+|---|---|---|---|
+| L6 | dim-specific | **+ a repeated `tools:` path** | `duplicate_id` |
+| L11 | dim-specific | **+ any `tools:` entry not a regular executable file** | `tool_missing` |
+| L27 | dim-specific | **+ applied to every `tools:` entry** | `path_escape` |
+| L28 | dim-specific | **+ `tools:` not a list of non-empty normal-form strings** | `unknown_item_key` |
+| **L29** | generic | A repeated mapping key at any depth, including via `<<:` merge | `duplicate_key` |
+| **L30** | dim-specific | `core.yaml` `entries` absent, `null`, or `[]` | `core_empty` |
+| **L31** | generic | Installed tree (`.hos-release` present) and a checked file disagrees with `.hos-manifest` (TD-D48) | `installed_drift` |
+| **L32** | dim-specific | A deterministic binding's string `tool` is not exactly a `tools:` entry | `tool_untrusted` |
+| **L33** | dim-specific | A predicate pattern outside TD-D44's subset (one quantifier, tail ≤ 16 pieces, ≤ 256 chars) | `unsafe_pattern` |
+| **PL1** | plan-time | A `resolve_for_diff` path that is empty, longer than **1024** bytes, or contains `\n`/`\x00` (architect, round 1) | `bad_changed_file` |
+
+**Order (supersedes TD-D28 steps 1–3; step 4 is unchanged):**
+1. **Engine, before any parse:** L22 → L2 → L26 → L24 → L1 → L25 → **L31** → L20 *(architect,
+   round 1: the draft put L31 after L20)*. L31 needs the pack set, which **L24** produces, and it needs
+   nothing from L20's directory scan. In the draft position, the commonest resolved-packs drift
+   (deleting a slug while its `pack-<slug>.yaml` remains) reported L20 `stale_pack_file`. That
+   contradicted the stated purpose: "a drifted file is reported as drift and not as whatever defect the
+   drift introduced". Running before L20 and before any parse makes that true for every checked file.
+   Relative order among the W5a rules is unchanged, and L31 is skipped without `.hos-release`, so no
+   W5a test moves.
+2. **Engine, per file:** L3a *(YAML unparseable)* → **L29** → L3a *(not a mapping, or wrong `schema`)*
+   → L3b → L4 → L5 → L18 → L23. This corrects TD-D41's "before L3a" (TD-VF-30). L3a's code and
+   condition are unchanged. Only its position relative to L29 is now explicit.
+3. **Handler:** **L30** → L28 → L6 → L7 → L8 → L9 → L13 → L14 → **L33** → L27 → L10 → L11 → **L32** →
+   L12 → L21 → L15 → L16 → L17 → L19.
+   - L33 follows L14, so an uncompilable pattern stays `bad_predicate`.
+   - L32 follows L11, so W5a's T5.11 assertions stand unchanged. An unlisted path that is also absent
+     reports `tool_missing`, and an unlisted, existing executable (the #1932 case) reports
+     `tool_untrusted`.
+
+### E.6 API delta (to §C.2.7)
+
+- `ResolvedRegistry` gains `tools: tuple[str, ...]` (TD-D43).
+- `resolve_for_diff` may now raise `RegistryError` (PL1).
+- No signature changes. The purity constraints still hold: L31 reads two files under `repo_root`, and
+  reads no environment, runs no subprocess, and imports no `regions`.
+
+### E.7 Tests — T5.54…T5.64
+
+Everything except T5.63 goes in a **new** file, `tests/automation/test_dimension_registry_hardening.py`.
+It reuses `write_repo`/`default_docs` by import, as the CLI test already does. W5a's
+`default_docs()["core"]` gains `"tools": ["scripts/gates/lint.sh"]`, and that is the **only** change to
+`test_dimension_registry.py`.
+
+- **T5.54 L29:**
+  - A duplicated `bindings:` in a pack file gives `duplicate_key`.
+  - So do a duplicated `predicate` inside a binding, and a `<<:`-merged key repeated explicitly.
+  - The message names the key and its line.
+  - *(architect, round 1)* A complex unhashable key (`? [a, b]: 1`) gives `bad_schema`, never
+    `kind_handler_failed`.
+- **T5.55 L30:**
+  - Absent, `null` and `[]` each give `core_empty`.
+  - `entries: "x"` gives `unknown_item_key`.
+- **T5.56 L31:**
+  - **Skipped:** without `.hos-release` the load is green, even next to a garbage `.hos-manifest`.
+  - **With `.hos-release`, each case below gives `installed_drift` carrying the named path:**
+    - no manifest;
+    - no core row;
+    - two core rows;
+    - a non-WHOLE core row;
+    - `core.yaml` trimmed to one entry (the architect's case);
+    - an edited `pack-django.yaml`;
+    - an edited `resolved-packs.txt` with `packs=None`;
+    - *(architect, round 1)* `resolved-packs.txt` edited to drop `django` while `pack-django.yaml`
+      remains. This gives `installed_drift`, **not** `stale_pack_file`, and pins the L31-before-L20
+      order;
+    - *(architect, round 1)* `pack-django.yaml` deleted while its manifest row and the `django` slug
+      remain. This gives `installed_drift` with "absent".
+  - **Green cases:**
+    - an explicit `packs=` skips the `resolved-packs.txt` check;
+    - all rows matching, in both v2 and v1 row forms, loads green;
+    - a malformed row for an unrelated path is ignored.
+- **T5.57 parity:** for each row form (v2, v1, comment, blank, whitespace-only *(architect, round 1)*,
+  the schema marker, and a 4-field row),
+  the loader's lookup agrees with `regions.parse_manifest_line`. Where the parser raises `ValueError`,
+  the loader reports `installed_drift`.
+- **T5.58 L32 and the `tools:` extensions:**
+  - An executable, unlisted `scripts/gates/stub.sh` in a pack binding gives `tool_untrusted`, and the
+    same tool in a project binding does too. So does `./scripts/gates/lint.sh`. A listed tool loads
+    green.
+  - `tools:` in a pack file gives `core_only_key`.
+  - A non-list, a non-string, `""` and `scripts//gates/lint.sh` each give `unknown_item_key`.
+  - A duplicate entry gives `duplicate_id`.
+  - A listed but absent or non-executable unbound tool gives `tool_missing`. A listed `../x.sh` gives
+    `path_escape`.
+- **T5.59 digest:** adding an entry to `tools:` changes `digest`, and `to_json()["tools"]` is sorted.
+- **T5.60 L33:**
+  - Each of `(a+)+$`, `a*a*b`, `a|b`, `x{2}`, `.*?`, `\1`, `a^`, `$a`, `[[:alpha:]]`, `\b*`,
+    `(?s)x` and a 257-character literal gives `unsafe_pattern`.
+  - Each of `\bsecret`, `(?i)pii`, `/test_[^/]*\.py$`, `.*` and `\d+` loads green.
+  - An uncompilable `(` gives `bad_predicate`.
+  - *(architect, round 1)* `.*` followed by a 16-piece tail loads green. `.*` followed by a 17-piece
+    tail gives `unsafe_pattern`. So does `(?i).*` + 250×`a` + `b` (256 characters, one quantifier):
+    the draft's grammar admitted it, at 4.5 s per pair.
+- **T5.61 ReDoS regression (#1931 acceptance):**
+  - A project binding with `(a+)+$` fails `load()` with `unsafe_pattern`. It is never planned.
+  - *(architect, round 1)* The worst admissible shape, `(?i).*` + 15×`a` + `b` (a 16-piece tail), runs
+    through `resolve_for_diff` against a 1024-byte `"a"*1024` path and finishes in under 2 s. The
+    measured time is about 20 ms, so the bound has about 100× headroom. The draft named `.*x` at
+    L=4096, which is neither the worst shape nor the PL1 bound.
+- **T5.62 PL1:**
+  - *(architect, round 1: the bound is 1024)* A 1025-byte path, `""`, a path with `\n` and a path with
+    `\x00` each give `bad_changed_file`. So does a 342-character path of 3-byte UTF-8 characters
+    (1026 bytes), which pins that the bound is in bytes, not characters.
+  - A 1024-byte path is accepted.
+  - `cli.main(["plan", "--changed-file", "a"*1025], repo_root=…)` returns 1, and stderr carries
+    `bad_changed_file`.
+- **T5.63 (in `test_dimension_registry_data.py`, real tree):**
+  - `core.yaml`'s `tools:` is sorted. It equals **exactly** the set of deterministic `tool` values across
+    `core.yaml`, both `packs/*/dimensions.yaml` and HOS `project.yaml`, which is 11 paths.
+  - Every entry under `scripts/oversight/gates/` matches `protected_surfaces.txt`, through
+    `require_human_approval.py`'s `load_globs`/`matched_surfaces`, loaded by `importlib`, as in
+    `tests/framework/test_require_overseer_approval.py`.
+  - The unprotected set equals exactly `{"scripts/run_second_review.sh"}` (the ratchet).
+- **T5.64 order:** one two-defect fixture per new boundary. In each pair, the first-named rule's code
+  wins:
+  - (L25, L31), (L31, L20) and (L31, L3a-shape) *(architect, round 1: the draft's (L20, L31) is
+    reversed)*;
+  - (L3a-parse, L29): a duplicate before a syntax error gives `bad_schema`;
+  - (L29, L3a-shape);
+  - (L30, L28);
+  - (L14, L33) and (L33, L27);
+  - (L11, L32) and (L27, L32).
+
+### E.8 Scope boundaries
+
+- **#1939 (needs-human):** no dependency. §E.2 gives the degradation under each answer.
+- **#1942 (governance paths have no security-lens binding): OUT.** It is a routing-**data** and
+  lens-choice question: CORE vs HOS-PROJECT, and whether the lens is `security-reviewer`'s
+  application-security lens or a `self-reviewer`-style governance lens. That is a product/architecture
+  question for `pm-agent`/`architect`, not engine hardening.
+  - It re-pins T5.28, as #1938 does, and it should land with #1938.
+  - Its deadline is W7, not W5c: no reviewer is invoked from the registry before W7.
+  - Folding it in would add `privacy-reviewer`/`pm-agent` to this slice's review set and mix a routing
+    widening into a security-control change.
+- **Not touched:** postures (L12 validates them semantically) and prompt bytes (TD-D34 hashes them at
+  W7). Neither is in L31's checked set. If the architect wants them there, the change is additive.
+- **W5c inherits:**
+  - TD-D43 (i)–(iii);
+  - **T5.47 gains** "after a real `--pack django` install, `load(target)` is green". That proves the
+    installer emits every row L31 checks (core via item 1, pack and resolved-packs via TD-D32);
+  - `core.yaml` stays on the item-1 ship-list, which L31 requires.
+  - *(architect, round 1)* **TD-D43 (iv):** the W5c sweep loads the registry with `packs=None`, and it
+    never forwards an explicit pack set (`dimension_registry_cli.py --pack`) in an installed tree. An
+    explicit set skips L31's `resolved-packs.txt` check by design. That is correct for the CLI's
+    diagnostic use. It is not acceptable on the path that decides which controls run.
+- *(architect, round 1)* **§D.10 Q4's follow-up** (`.mjs`/`.cjs`/`.jsx`/`.tsx` and the
+  dependency-manifest security binding) must express its predicates inside L33's subset. In
+  particular, `(^|/)package\.json$` is inadmissible (it has a group and an alternation). Write it as the
+  two patterns `^package\.json$` and `/package\.json$`.
+- **#1644 T3.1 inherits** L29 and L31 unchanged. Its `contract/stages/core.yaml` must therefore ship
+  through the ship-list, so that it has a WHOLE row.
+
+### E.9 File budget and review set
+
+| # | Path | New/Mod | Protected? |
+|---|---|---|---|
+| 1 | `scripts/automation/lib/dimension_registry.py` | mod (L29–L33, PL1, `tools`, the `KINDS` row) | no |
+| 2 | `contract/dimensions/core.yaml` | mod (`tools:` block, TD-D42) | yes (`contract/**`) |
+| 3 | `tests/automation/test_dimension_registry.py` | mod (fixture `tools:` only) | no |
+| 4 | `tests/automation/test_dimension_registry_hardening.py` | new (T5.54–T5.62, T5.64) | no |
+| 5 | `tests/automation/test_dimension_registry_data.py` | mod (T5.63) | no |
+
+- That is **5 files, one coding PR**, with 10 files of headroom.
+- No script is added, so there is no `SCRIPTS-INDEX.md` regeneration.
+- The CLI, `posture.py`, the installer, the sweep and `CLAUDE.md` are untouched.
+- This amendment ships in its own TD PR (the §D.7 Q6 precedent).
+- The code PR is CODEOWNERS-gated through `contract/**`.
+
+**Review set:**
+- `code-reviewer`;
+- `security-reviewer` (the engine, and the `tools:` allowlist as a trust boundary);
+- `reliability-reviewer` (L31 fail-closed on half-applied upgrades, and the PL1/L33 cost bound);
+- `infra-reviewer` (L31's reliance on installer artifacts).
+
+### E.10 Open questions — to `architect` (none blocks the coder except Q1)
+
+- **Q1 (confirm, BLOCKING):** L31 fails **closed** on drift in installed trees, keyed on `.hos-release`.
+  This is fail-closed behaviour for consumers, and it becomes visible to them at W7.
+- **Q2 (route, non-blocking):** two observations belong to #1935's protected-surface reclassification,
+  not to this slice. They are why T5.63 is a ratchet.
+  - `scripts/run_second_review.sh` is a CORE control entry point that no protected glob covers.
+  - `.hos-manifest` is unprotected (TD-VF-31).
+- **Q3 (confirm):** the narrowing of AD-9's "CORE, PACK, and PROJECT may all contribute bindings"
+  (`ADR-1643:505-506`) for **deterministic** bindings. A PROJECT or PACK layer may bind only CORE-listed tools. No shipped or template project
+  binding is deterministic, so nothing regresses. A PROJECT-extensible allowlist would need its own TD,
+  because it re-opens #1932 for consumer-owned code. My recommendation is to defer it until a consumer
+  needs it.
+- **Q4 (confirm):** the single-quantifier limit in TD-D44, over a limit of two. Two is measured at 7.4 s
+  per pair at L=4096.
+
+**ESC: none.** No question needs a human. #1939 and the Q2 items already have owners.
+*(architect, round 1: superseded. Q1 and Q3 each carry a consumer-visible product consequence that
+takes effect at W7. They are routed as ARCH-ESC-E1 and ARCH-ESC-E2 in §E.12. Neither blocks this
+slice's coding. Both block W7.)*
+
+### E.11 Startup-gap analysis and affected sign-offs
+
+*Should this have been settled in the initial technical design?*
+- **#1932 and #1931: yes.** §7 already knew that W5c/W7 would execute bindings and that §7.5 runs
+  arbitrary `re.search` over a diff. Tool trust and predicate cost were both determinable then. This is
+  a `startup-artifact-gap`, and the orchestrating session should annotate the §C.3 issue. I file
+  nothing (task constraint).
+- **#1937: no.** It is TD-D41's recorded, architect-approved deferral, delivered here. TD-VF-30
+  corrects only its placement wording.
+
+**Affected sign-offs:**
+- **W5a (#1933) stands.** No existing rule changes its condition, code or relative order. T5.11 and
+  T5.39 are unchanged, by the L11-before-L32 and L27-before-L32 placement. The only W5a test edit is the
+  fixture's `tools:` key, which is required for the default fixture to keep loading green. The new rules
+  are new code, and they get fresh review in this slice.
+- **W5b (#1943) stands** for its existing content. The new `tools:` block in `core.yaml` is new data,
+  reviewed in this slice. T5.49–T5.53 are unchanged.
+- **W1–W4/W4b:** untouched.
+- **W5c and #1644 T3.1:** unbuilt, so there are no orphaned approvals. They inherit §E.8.
+
+### E.12 Architect rulings — Amendment E round 1 (2026-10-03)
+
+**Verdict: APPROVED_WITH_EDITS.** The round-1 edits are applied in place and marked
+"architect, round 1":
+- TD-D44 (the tail bound, and the cost bound corrected);
+- TD-D45 (PL1 lowered to 1024 bytes);
+- TD-D46 (unhashable keys, and the compose-phase vs construct-phase order);
+- TD-D48 (pack-file deletion closed, and whitespace-only manifest lines);
+- §E.5 (L31 moved ahead of L20, and the table rows);
+- T5.54, T5.56, T5.57, T5.60, T5.61, T5.62 and T5.64;
+- §E.8 (TD-D43 (iv), and the §D.10 Q4 follow-up constraint);
+- §E.10's ESC line;
+- the human-review confidence line;
+- the top-of-document pointer.
+
+The coder may start the hardening slice once this amendment's TD PR merges. ARCH-ESC-E1 and
+ARCH-ESC-E2, below, block **W7**, not this slice.
+
+**Verified against the tree at `ba1e67b97` (not taken from the draft):**
+- **TD-VF-28 holds.**
+  - L11 is `is_file` + `X_OK` only (`dimension_registry.py:577-587`), and `_body` hashes the `tool`
+    string (`:694`).
+  - Eleven tools: nine in `core.yaml:151-199`, `packs/django/dimensions.yaml:57` and
+    `packs/astro/dimensions.yaml:46`. All eleven are `100755` in the index.
+  - `protected_surfaces.txt:29` covers ten of them. No glob covers `scripts/run_second_review.sh`.
+  - No `tool:` appears in HOS `project.yaml` or in the template.
+- **TD-VF-29 holds for the data.**
+  - An independent probe found 96 patterns, none with alternation, a group, or more than one
+    quantifier. The longest tail is `\.html`.
+  - The **cost claim built on it did not hold**: see Q4.
+- **TD-VF-30 is consistent with PyYAML's two-phase design.** It is refined in TD-D46 (construct-phase
+  errors are interleaved with L29).
+- **TD-VF-31 holds.**
+  - `cp_framework_file` is a plain `cp` (`hos_install.sh:615-626`).
+  - `enumerate_framework_files` hashes the source bytes (`:2205-2225`), and it covers all of
+    `scripts/oversight/` and `run_second_review.sh`, so every `tools:` entry ships to every consumer.
+    L11's new check on unbound entries therefore cannot fail a correct install.
+  - `.hos-release` is written last (`:2408-2416`).
+  - `regions.py:47` imports argparse, and `parse_manifest_line` is at `:1103-1119`.
+  - Neither `.hos-release` nor `.hos-manifest` exists in HOS's tree.
+- **TD-VF-32 holds.** The CLI forwards `--pack` as an explicit `packs=` argument
+  (`dimension_registry_cli.py:100`), hence TD-D43 (iv).
+- **The W5a/W5b claims hold.**
+  - T5.11's three cases still report `tool_missing` under L11-before-L32. T5.39's symlink case still
+    reports `path_escape` under L27-before-L32.
+  - T5.29 pins no digest literal, and the CLI tests pin no 64-hex value, so `_body`'s new `tools` key
+    breaks nothing.
+  - W5b's `stage()` copies `scripts/oversight/gates/` and `run_second_review.sh` with their modes, so
+    T5.50 and T5.53 stay green under the extended L11. T5.49 asserts the entry ids, binding ids and
+    source files, and none of them changes.
+
+**Rulings on §E.10:**
+
+- **Q1 — CONFIRMED (technical): L31 fails closed. Warn-only stays rejected.** Its consumer-facing
+  effect is provisional until **ARCH-ESC-E1** clears.
+  - **Why it is right.** AD-9's "the loader fails closed, always" was human-cleared through the ADR.
+    `core.yaml:1` already declares the file HOS-owned and overwritten on upgrade. The installer
+    already treats HOS-owned drift as a hard stop at install time (the CORE/PACK region rule). L31
+    moves that same posture to load time. A warn-only L31 would recreate AF-5: a review gate running
+    on a core that differs from the one that was reviewed.
+  - **What can still go wrong:**
+    1. **A line-ending rewrite.** A consumer clone with `core.autocrlf=true`, or an `eol=crlf`
+       `.gitattributes`, changes the working-tree bytes. Every load then fails closed on that clone.
+       This is the same byte-hash semantics `--prune` already uses, so it is not a new class of
+       defect. It is a new place where the defect becomes *visible*, and the infra-reviewer must
+       check it explicitly.
+    2. **Install via PR.** An install-via-PR branch is consistent: core, manifest and `.hos-release`
+       move in one commit. Any process that cherry-picks only part of an upgrade commit fails closed,
+       which is intended.
+  - **Is it structural before coding? No.** No consumer receives the loader before W7 (ESC-E), and
+    HOS's own tree skips L31 because it has no `.hos-release`. This slice therefore changes nothing a
+    user can observe.
+  - **It is a new consumer-visible failure mode and recovery obligation from W7**, so it goes through
+    the product/policy checkpoint first (ARCH-ESC-E1). W7 may not merge until it clears. If the human
+    rejects fail-closed, the rework is confined to L31's raise site and T5.56.
+- **Q2 — ROUTED to #1935, confirmed.** The orchestrating session annotates #1935 with both items;
+  this round posts nothing.
+  - **(a) `scripts/run_second_review.sh` is a CORE control entry point outside every protected
+    glob.** This is pre-existing (the pipeline calls it today), and L32 does not worsen it. It is now
+    *named* as a control, which makes the gap legible. T5.63's exact-set ratchet is the right forcing
+    function. Do not weaken it to a subset check.
+  - **(b) `.hos-manifest` is unprotected**, so L31 is an integrity control, not a tamper control,
+    exactly as TD-D48 says. Protecting it is #1935's call, because it is a `protected_surfaces.txt`
+    edit, which is itself human-gated.
+- **Q3 — CONFIRMED (technical): PACK and PROJECT deterministic bindings may name only CORE-listed
+  tools.** Its consumer-facing effect is provisional until **ARCH-ESC-E2** clears.
+  - **It narrows less of AD-9 than the draft states.** AD-9 (`ADR-1643:505-506`) still holds:
+    "CORE, PACK, and PROJECT may all contribute bindings". Every layer may still add a deterministic
+    binding, with its own predicate, on any entry. What is narrowed is the *set of executables* a
+    binding may name. AD-9 already defines a deterministic `tool` as "a gate/validator script", and
+    L32 makes CORE the sole authority on which scripts qualify. ESC-5's ruling concerned suppression
+    and layering, and L32 touches neither. Judgment bindings are unaffected.
+  - **PACK coupling is intended.** A new pack gate needs a `core.yaml` `tools:` edit (`contract/**`,
+    human-gated). Under #1939 answer (c), that coupling is the only thing that human-gates a new pack
+    tool.
+  - **The draft's rejected alternatives are correctly rejected.** Option (3) would admit
+    `bootstrap/submit_pr.sh` as a control, and option (1) would admit `expensive_gates_stub.sh`.
+  - **A PROJECT-extensible allowlist stays deferred** to its own TD. Any future design must require
+    the listed tool's *code* to sit on a protected path in the consumer, or #1932 re-opens for
+    consumer-owned scripts.
+  - **Is it structural before coding? No.** No consumer has deterministic bindings today, none is
+    shipped or templated, and nothing reaches consumers before W7. From W7, however, consumers cannot
+    register their own script as a deterministic control. That is a product capability decision, so
+    it goes to pm-agent and the human (ARCH-ESC-E2). If they require the capability at W7, it is
+    *additive* to L32 (a protected PROJECT allowlist), so this slice's code stands either way.
+- **Q4 — CONFIRMED, one quantifier, with a binding addition: tail ≤ 16 pieces, and PL1 at 1024
+  bytes.**
+  - **One quantifier, not two, is correct.** Two quantifiers make the cost O(L³), measured at 7.4 s per
+    pair. No shipped pattern needs two.
+  - **The draft's cost claim was wrong.** The grammar bounded the quantifier count, but not the work
+    done per backtrack step. In the architect's measurements (CPython 3.14.4, `"a"*4096`):
+    - `(?i).*` + 250 literals: **4.5 s** per pair, admitted by the draft grammar;
+    - plain `.*` + 250 literals: 1.7 s;
+    - `(?i).*x`: 33 ms.
+  - Cost scales as L²·t, and the prefix is immaterial (measured).
+  - Bounding the tail at 16 pieces and the path at 1024 bytes gives about 20 ms per pair in the worst
+    case, with `(?i)`. Every shipped pattern stays admissible: the longest tail is 5 pieces.
+  - The positive-grammar approach, the hand-written scanner, the ban on `sre_parse`, and the rejection
+    of a timeout and of `re2` are all correct as drafted.
+
+**Also confirmed without edit:**
+- **TD-D42/L32**, with its exact-equality comparison and its placement after L11 and L27. The
+  `tools:` normal-form rule under L28 is correct. `//x` falls to L27 as absolute, and `../x` falls to
+  L27 as `..`.
+- **TD-D43 (i)–(iii)**, including the named TOCTOU residual.
+- **TD-D47 (L30) as a floor**, with the closure assigned to T5.49 and L31. This satisfies §D.10 Q7's
+  scope note.
+- **§E.8's exclusion of #1942** (a routing-data and lens question, which lands with #1938, by W7).
+- **§E.9's five-file budget and review set.** Add one point to the review set: `infra-reviewer` must
+  explicitly check Q1 risk 1 (line endings).
+
+**Startup-gap and affected sign-offs:** these concur with §E.11.
+- #1931 and #1932 are a `startup-artifact-gap`, and the orchestrating session annotates the §C.3
+  issue. Q4's cost-bound defect is a drafting error in this round, not a startup gap.
+- **W5a stands.** No existing rule's condition, code or relative order changes. L31 moving ahead of
+  L20 is invisible without `.hos-release`.
+- **W5b stands.** `tools:` is new data, reviewed in this slice.
+- W5c, W7 and T3.1 are unbuilt, so they have no orphaned approvals. W5c inherits TD-D43 (i)–(iv).
+
+**ARCH-ESC items.** These are routed by the orchestrating session, through an issue
+(`bootstrap/create_issue.sh`) plus `bootstrap/escalate_to_human.sh`, to **pm-agent** (product impact)
+and to the **human** (policy). Neither blocks this slice's coding, and **both must clear before #1643
+W7 merges.**
+
+1. **ARCH-ESC-E1 — consumer-visible fail-closed conditions on the review sweep (Q1, PL1).**
+   > From W7 on, in an installed consumer repository, the review-dimension sweep will refuse to run,
+   > blocking review and therefore merge, in either of two cases:
+   > - **(a)** `contract/dimensions/core.yaml`, an installed `contract/dimensions/pack-<name>.yaml`, or
+   >   `contract/resolved-packs.txt` differs byte-for-byte from the hash recorded in `.hos-manifest` by
+   >   the installed HOS release. This includes a hand edit, a deleted pack file, a partially applied
+   >   upgrade, or a line-ending conversion on checkout. The recovery is to re-run
+   >   `bootstrap/hos_install.sh`; local routing changes belong in `contract/dimensions/project.yaml`.
+   > - **(b)** A changed file's path in the diff is longer than 1024 bytes, or contains a newline or NUL.
+   >
+   > Do you accept fail-closed for both? That is the architect's recommendation: a review gate must not
+   > run on routing data that differs from the release that was reviewed. Or do you require (a) to be
+   > warn-and-continue?
+
+2. **ARCH-ESC-E2 — consumers cannot register their own scripts as deterministic review controls
+   (Q3).**
+   > From W7 on, a consumer's `project.yaml` (and any pack) may add deterministic review bindings only
+   > for the 11 HOS-shipped gate scripts listed in CORE's `tools:`, each with its own file predicate. A
+   > consumer that wants its own script, such as `scripts/my_check.sh`, to run as a review control
+   > cannot do so through the registry until a separate design adds a protected, consumer-extensible
+   > allowlist.
+   >
+   > Do you accept this restriction for v0.7.0? That is the architect's recommendation: letting
+   > consumer-editable data select consumer-editable code as a "control" is #1932's threat. Or must a
+   > protected PROJECT allowlist be designed and land before W7?
+
+**Loop state:** approved in round 1. Per CORE, the round temp file is deleted on approval, so none is
+left.
+
+---
+
+## Human Review Required — Amendment E (2026-10-03, registry loader hardening)
+
+**RISK: HIGH.** The amendment defines the trust boundary between registry data and executed code
+(CWE-829) just before W5c starts executing bindings. It also adds a fail-closed integrity rule to the
+loader that will gate review.
+- A wrong L32 would let data select code.
+- A wrong L31 would either break every consumer load or pass a trimmed core.
+- Mitigations: nothing executes bindings yet, nothing ships to consumers before W7, and the code PR is
+  human-gated through `contract/**`.
+
+**CONFIDENCE:**
+- **HIGH** on TD-VF-28…TD-VF-32. Each was re-read at the cited lines, and TD-VF-29/-30 were probed in
+  `/tmp/claude/tde/` only.
+- **HIGH** that L33's subset admits all 96 current patterns (probe) and rejects `(a+)+$` and the
+  polynomial forms.
+- **HIGH** that L31's inputs exist as described, for the source-copied core. **MEDIUM** for pack and
+  resolved-packs rows, which depend on W5c's unbuilt TD-D32. W5c's T5.47 extension pins them.
+- **MEDIUM** on the cost bound's constants. They were measured on CPython 3.14.4, while CI runs 3.12.
+  The O(L²) shape is structural, and T5.61's 2 s bound leaves wide headroom.
+  *(architect, round 1: the draft's constant was wrong by about 900×, because it ignored the tail
+  length and `(?i)`. It is corrected in TD-D44, with the tail bound and PL1 at 1024. The re-measured
+  worst case is about 20 ms per pair.)*
+
+**BLAST RADIUS:**
+- **This document:** the header block, the Date line, and Amendment E.
+- **Downstream:** the 5 files in §E.9.
+- **Forward:** W5c (TD-D43 (i)–(iii), the T5.47 extension) and T3.1 (L29/L31).
+- **Not touched:** W1–W4, `posture.py`, the CLI, the installer, the sweep, and any routing data other
+  than the `tools:` block.
+
+**Change classification: ADDITIVE.** All five rules are stricter-only, on a loader that has no
+consumer and no executor yet. One new CORE key carries a literal derived from the current data, and no
+built contract is reversed. If the architect judges either of the following **structural**, it goes to
+a human before the coder starts:
+- L31's fail-closed consumer behaviour (Q1);
+- the AD-9 narrowing (Q3).
+
+**Architect review is requested.** This amendment is not handed to the coder until the architect
+approves. Iteration: Amendment E round 1 of 5. No temp-state file was written, because this dispatch was
+constrained to edit this one file only.
+
+**Not done here:** no code, data, test or script was written into the repository. No issue was filed,
+no label was created, no comment was posted, nothing was committed, and no register entry was written.
