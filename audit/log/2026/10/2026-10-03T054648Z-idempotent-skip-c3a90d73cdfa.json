@@ -1,0 +1,1 @@
+{"event":"idempotent-skip","head_sha":"589be20e07adf5fddbccfbd5dae560dcef925c66","pr":1956,"prior_event":"pr-review","prior_review_id":5399226431,"reason":"1215 precheck: verdict + escalation thread already posted on this head; no new commits or human input since; needs-human label present"}
