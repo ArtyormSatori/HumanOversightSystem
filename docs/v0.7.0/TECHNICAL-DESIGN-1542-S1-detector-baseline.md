@@ -1733,3 +1733,23 @@ orphaned approval exists.
 specified above). Next: `technical-design` folds RC2-1…RC2-4 into the body, and the architect checks
 that fold for presence only. The coder may begin PR 1 against this document now, with this section
 governing where it differs from the body.
+
+---
+
+## Architect presence check — iteration 3 (2026-10-04)
+
+**Checked:** `git diff 388ab3ca9 13f5861fd` on this file. **RC2-1:** present. C2′ appears in the §6.4
+row, the C0 row, §6.3/TD-D6, §6.7, §8.2, §8.5 `new_accepted[]`, §8.6, `T-BL-18`/`T-BL-19` and the
+`T-CLI-20` passing half. **RC2-2:** present (`T-FN-08`, §4.4, §14 PR 1 body, §15 item 7). **RC2-3:**
+present (both cause-line forms reworded, N10, `T-BL-17`). **RC2-4:** present (`:758`/`:768` are
+`accepted`, `"descriptive reference"`, `#1538`; `:585`/`:810`/`:823` stay debt; §8.2 C0 wording; the
+owner "—" paragraph). **The three detail fills are confirmed as written.** (1) `T-CLI-20` passing half:
+the same rename, new site removed, renamed entries kept `debt` → exit 0, `added == []`,
+`new_accepted == []`. (2) The prohibition-list owner "—" stays, and it now means "keep the §6.5
+default". (3) `T-BL-18`/`T-BL-19` assert a non-conformant (exit-3-class) verdict at the pure-logic
+tier, and the CLI tier owns the real exit code. This is correct layering, since L1 returns verdicts and
+L2 maps them to exit codes.
+
+**Verdict: APPROVED FOR CODER.** No remaining design defect. Human-held: ESC-S1-1 blocks **merging**
+PR 1, not coding it. ESC-S1-2 blocks only the promotion to required after PR 2. ADR ESC-1/2/3 block
+slice 1 not at all. **Loop closed at architect round 3 of 5.**
