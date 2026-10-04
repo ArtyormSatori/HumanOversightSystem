@@ -1459,3 +1459,157 @@ needs no change. Restate it in one sentence in §6.4 so nobody "fixes" it with a
 
 **Iteration log:** architect round 1 of 5. Next: `technical-design` iteration 2 applies RC-1…RC-10.
 Architect re-reviews RC-1, RC-2, RC-3 and RC-4 substantively, and the rest for presence.
+
+---
+
+## Architect review — iteration 2 (2026-10-04)
+
+**Reviewer:** `architect`. **Verified against:** branch HEAD `99cedc00a`; the iteration-2 delta is
+`git diff 7b61a313f 99cedc00a` on this file; ADR-1542 Amendment 2; `overseer.md:755-770`;
+`.github/workflows/tests.yml:69-71`; `bootstrap/hos_install.sh:1908-1917`.
+
+**Verdict: APPROVED WITH REQUIRED CHANGES. Ready for the coder, subject to RC2-1…RC2-4 below.** All
+four RC2 changes are specified completely in this section, and they bind the coder **as written here**.
+Where this section and the body differ, this section governs. `technical-design` folds them into the
+body (§6.3, §6.4, §5, §8.2, §8.5, §12.3, §13) before PR 1 is opened. I will check that fold for
+presence only; it is not another design round. RC2-1 is a correctness fix: a disposition-laundering
+hole in closure that iteration 1 also had and I missed. RC2-2…RC2-4 are provenance, honesty and
+consistency fixes.
+
+### A. RC-1…RC-4 — substantive re-review
+
+- **RC-1 (C1′): HOLDS.** §6.4 C1′ implements AM2-2 exactly. I stress-tested five edits. **Rule rename
+  plus a new site:** the new text is absent from the base docs, so it lands in `added`. **Duplicate site
+  inserted *above* a baselined one:** occurrences renumber, `occurrence 2` is not in the base scan, so it
+  lands in `added`. This is correct: the count grew. **Site moved between documents:** `doc` is in the
+  fingerprint, so it lands in `added`. This is correct and strict. **Baselined site edited but not
+  fixed:** lands in `added`, the intended ratchet. **Fingerprint-version bump:** applied symmetrically
+  by the head L1, so no special case is needed. The `B.entries ∪` term is redundant once X1 held at
+  base, and it is harmless. **Residual:** closure fixes *which fingerprints* may exist. It does not fix
+  *what disposition* a newly fingerprinted entry carries. That gap is RC2-1.
+  Malicious edits to head L1 itself remain N8, disclosed, and now signalled by R1.
+- **RC-2 (C0/C0s): HOLDS.** "Absent at both" closes the stale-base fail-open, and C0s is fail-closed
+  (exit 1, `T-CLI-19`, acceptance item 9). In CI, the `pull_request` merge ref plus `fetch-depth: 0`
+  puts the merge-base at the target tip, so a fresh PR is never C0s. **Disclosed, not a defect:** in a
+  local clone whose `refs/remotes/origin/main` was never fetched after PR 1 merged, C0 holds and closure
+  reads `not_applicable`. That is acceptable only because §9.2 already makes the `sandbox-detector` CI
+  job the sole closure authority, and local runs check exactness only. Keep that sentence. One stale
+  parenthetical remains (RC2-4(b)).
+- **RC-3 (frozen `EXCLUDED_NAMES`): HOLDS in design. Item (a) is answered below.** It is a literal,
+  AST-guarded (`T-FN-07`), and collision-guarded (`T-FN-06`). The finding set no longer depends on the
+  interpreter. **Gap:** nothing verifies that the pasted literal actually *is* the 3.12 set. A literal
+  generated under 3.14 would pass `T-FN-06` and `T-FN-07` on both interpreters. RC2-2 closes this.
+- **RC-4 (HOS-only contexts): HOLDS.** Verified that `hos_install.sh:1908-1917` ships
+  `scripts/framework/` **by list** (`framework_consumer_files.txt`), not by glob. An unlisted
+  `hos_required_contexts.txt` therefore cannot reach a consumer. `T-RP-09` asserts that, and
+  `setup_branch_protection.sh`'s "if present" read is a no-op in consumers. Name validation before any
+  API call prevents JSON injection. The literal list stays byte-identical, so the existing regex test
+  keeps working. AM2-7(ii) is not enlarged. PR 2 has 5 files. Correct.
+
+### B. RC-5…RC-10 — presence
+
+RC-5 (a)–(e): **present** (§6.1 pattern, §6.3 schema rule, §6.5, §11, §12.3, `T-BL-12`, `T-RP-06`). One
+correction of my own ruling is in ruling (b). RC-6: **present** (R1 row, §8.5 payload, `T-BL-16`,
+`T-CLI-21`). RC-7: **present** (§4.2, §4.3 P8, `T-R-RAWGIT-P8`). RC-8: **present** (N9, §8.5 cause line,
+`T-BL-17`). Its wording is amended by RC2-3. RC-9: **present** (§0.2 AV-4: 14 functions and
+`get_branch_protection`; §11 routing). RC-10: **present** (header, §16.1 ruled table, §16.2 sharpened
+ESC-S1-1/2). Release-branch note: **present** (§6.4).
+
+### C. Rulings on the three flagged items
+
+- **(a) RC-3 literal not enumerated in the TD: ACCEPTED, conditional on RC2-2.** Producing the literal is
+  mechanical, so the design does not need to contain it. A list typed here from memory or from 3.14
+  would be worse than none. What the design must contain is a way to *verify* the literal, and RC2-2
+  supplies it. The required `tests` job runs CPython 3.12 (`tests.yml:71`), so a version-gated equality
+  test does run on every PR. The coder may generate the literal with any 3.12 interpreter, for example
+  `uv run --python 3.12`, or a throwaway CI step. The PR 1 description must state the exact
+  interpreter version and the one-line generating expression.
+- **(b) `overseer.md:758`/`:768`: CORRECTED.** My iteration-1 RC-5(a) misclassified them. On HEAD,
+  `:758` is `` `bootstrap/lib/comment_format_check.sh` `` and `:768` is
+  `` `scripts/oversight/lib/detect_stack.sh` ``. Both are `SB-SRCLIB` (a shell-construct rule) inside
+  explanatory prose that instructs nothing ("All three wrappers below call…", "same idiom as … in …").
+  The AM2-1 corollary covers only the call-a-function family, so it does not apply. §6.3's rule governs
+  and gives **`accepted`, rationale exactly `"descriptive reference"`**. The owner keeps the `SB-SRCLIB`
+  default `#1538`. I am reversing my own ruling rather than keeping a "stricter" one, for three reasons.
+  First, the iteration-1 basis was a factual error. Second, debt would assign slice 1b to "remove"
+  accurate explanatory prose. The only way to do that is to strip the code-span backticks, which games
+  the detector instead of fixing anything. Third, an inconsistent ad-hoc exception would weaken the one
+  rule the human reviewer applies entry by entry. `:585`, `:810` and `:823` are call-a-function
+  references and stay **debt / `ADR-1542 slice 1b`**, unchanged. The PR 1 human reviewer confirms every
+  `accepted` entry, these two included (§12.3).
+- **(c) RC-8 cause inference without a base function index: CONFIRMED, with a wording change (RC2-3).**
+  The inference is sound with one exception. Assume L1 is unchanged (so `RULE_IDS`, `EXCLUDED_NAMES` and
+  rule logic are unchanged) and the text is unchanged. The only input that can make an `SB-FNCALL` unit
+  newly findable is then `RepoFacts.fn_index`. Building a base index would mean `ast.parse` over the
+  base tree's Python files, which is cost with no gate value, because the line never changes the exit
+  code. **The exception:** the same signature (admissible via the base scan, absent from `B`, L1
+  unchanged) is also produced when **the base itself was non-conformant**. That happens when a site
+  landed on `main` while `sandbox-detector` was advisory (the window between PR 1 and ESC-S1-2), or
+  when a human merged over a red required check. In that case "index grew" is a misattribution, and a
+  diagnostic must not assert a cause it has not established. RC2-3 fixes the wording and discloses the
+  inheritance behaviour behind it.
+
+### D. Required changes (binding as written; fold into the body before PR 1 opens)
+
+- **RC2-1 — Close disposition laundering through new fingerprints (amends C2).** C2 compares
+  dispositions only for fingerprints present in both `B` and `H`. A rule rename (or a fingerprint-version
+  bump) gives every entry a new fingerprint, so C1′ admits them all (correctly) and C2 compares nothing.
+  The same PR can then mark former `debt` entries `accepted`. R1 would list the removals, but nothing
+  fails. That is exactly the "reclassify it as a prohibition" escape TD-D6 forbids. **New check C2′:**
+  when closure is enforced, every `e ∈ H.entries` whose fingerprint is **not** in `B.entries` must have
+  `disposition == "debt"`. Violations go in `closure.new_accepted[]` and exit 3. The C0 seal is exempt,
+  because closure is `not_applicable` there and the seal assigns the initial dispositions. As a
+  consequence, after the seal **no new `accepted` entry can ever be created.** A new or renamed rule that
+  surfaces a prohibition sentence produces `debt`, and the remedy is to rewrite that sentence with a
+  fragment span (§6.3, TD-D6). That is consistent with TD-D6's "no future change ever *needs* a new
+  `accepted` entry". **Tests:** `T-BL-18` (rename plus a former-`debt` entry re-marked `accepted` →
+  `new_accepted`, exit-3 verdict) and `T-BL-19` (fingerprint-version bump with an `accepted` entry
+  carried across → `new_accepted`). Extend `T-CLI-20` to assert `closure.new_accepted == []` on its
+  passing half. Add `new_accepted[]` to §8.5's `closure` payload.
+- **RC2-2 — Prove the `EXCLUDED_NAMES` literal's provenance.** Add **`T-FN-08`**. When
+  `sys.version_info[:2] == (3, 12)`, assert `EXCLUDED_NAMES == frozenset(set(dir(builtins)) |
+  set(dir(dict)) | set(dir(list)) | set(dir(str)) | {"main"})`. On any other interpreter, skip with the
+  reason `"EXCLUDED_NAMES provenance is verified only under CPython 3.12 (the tests job)"`. The required
+  `tests` job runs 3.12, so this runs on every PR. Locally on 3.14 it is visibly skipped, never silently
+  passed.
+- **RC2-3 — Honest cause line and N10.** (i) In §8.5, change the `SB-FNCALL` cause text to
+  `text unchanged since base and absent from the base baseline; L1 unchanged — repo-function index grew,
+  or the base was non-conformant: <text>`. Change the other form to `text unchanged since base and
+  absent from the base baseline — newly findable, or the base was non-conformant: <text>`. (ii) In §5,
+  add **N10 — closure is relative to the base, not to the seal.** A site that reaches `main` without a
+  baseline entry (during the advisory window before ESC-S1-2, or by a human merge over a red required
+  check) is pre-existing text for every later PR. C1′ admits it, and X1 then forces the next PR that
+  touches nothing related to add its entry. The control is to close the advisory window promptly
+  (ESC-S1-2) and to treat a red `sandbox-detector` on `main` as a defect. The cause line makes the
+  inheritance visible instead of attributing it to someone else's code. Update `T-BL-17` to the new
+  text.
+- **RC2-4 — Consistency fixes.** (a) §12.3: move `overseer.md:758`/`:768` out of the call-a-function
+  debt row, give them `accepted`, `"descriptive reference"`, owner `#1538`, and replace the "Note on
+  `:758`/`:768`" paragraph with ruling (b). (b) §8.2 `baseline-init`: change "(module absent at base)" to
+  "(module absent at both the merge-base and `origin/main`; C0s is exit 1)". (c) §12.3: state that an
+  Owner cell of "—" means *keep the §6.5 default*. Every entry, `accepted` ones included, carries an
+  owner string matching the §6.1 pattern, which `T-RP-06` enforces. Never write `null` or `"—"`.
+
+No ADR change is needed. C2′ refines TD-D6 within AD-11 as amended by AM2-2. AM2-2 governs which
+entries are admissible, and C2′ governs their disposition.
+
+### E. Human-held items — blocking status
+
+| Item | Blocks coding PR 1? | Blocks merging PR 1? | Blocks later |
+|---|---|---|---|
+| ADR **ESC-1** | No | No | Slice 8 (lifecycle / `is_poisoned` debt owners) |
+| ADR **ESC-2** | No | No | Slice 9 (policy templates; activation of coverage legs 2/3) |
+| ADR **ESC-3** | No | No, because its slice-1 residue is ESC-S1-1 | Nothing further: post-seal additions are settled by AD-11 and AM2-2 |
+| **ESC-S1-1** (absorb `overseer.md:337-340`?) | **No.** The coder seals under the recommended default (absorb as `debt`, owner `ADR-1542 slice 2`) | **Yes.** The human must answer it at or before PR 1's CODEOWNERS review. That review is where §6.7's post-ADR list is presented. If the answer is "revert", the revert lands as a separate protected-surface PR first, and PR 1 re-seals after merging `origin/main` (permitted under C0) | — |
+| **ESC-S1-2** (re-run `setup_branch_protection.sh`) | No | No; it does not block PR 2 either | The **promotion** to required, after PR 2 merges. Per N10 (RC2-3), every day it slips is a day new sites can land on `main` and be inherited |
+
+**Startup-gap check (CORE).** *Should RC2-1 have been settled in the initial architecture review?* No.
+It is a property of this TD's closure design, and I should have caught it in round 1. It is caught
+before any code exists. *Affected sign-offs:* none. Nothing has been built or approved against
+iterations 1 or 2. Ruling (b) reverses a round-1 ruling of mine before anything was built on it, so no
+orphaned approval exists.
+
+**Iteration log:** architect round 2 of 5. Verdict APPROVED WITH REQUIRED CHANGES (RC2-1…RC2-4, fully
+specified above). Next: `technical-design` folds RC2-1…RC2-4 into the body, and the architect checks
+that fold for presence only. The coder may begin PR 1 against this document now, with this section
+governing where it differs from the body.
