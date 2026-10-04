@@ -1,0 +1,1 @@
+{"actor":"hos-overseer-hos[bot]","event":"pr-review-skipped-idempotent","head_sha":"28928a223cb688810af0743d855508aa720d6217","pr":1982,"reason":"PROPOSE_ONLY verdict review 5403590418 already posted on this head at 2026-10-04T00:27:29Z; no new commits, comments, or reviews since"}
