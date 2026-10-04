@@ -1,15 +1,30 @@
 # TECHNICAL DESIGN — #1542 slice 1: the allowlistability detector, the coverage check, and the closed debt baseline
 
-**Status:** **DRAFT — iteration 2 of 5 (CORE cap). REQUESTING ARCHITECT RE-REVIEW of RC-1…RC-10.**
-Iteration 1 was **APPROVED WITH REQUIRED CHANGES** (architect, 2026-10-03; full review preserved
-verbatim at the end of this document). TD-O1…TD-O7 are **ruled** (§16.1; ADR-1542 Amendment 2,
-AM2-1…AM2-7). This iteration applies RC-1…RC-10 and nothing else. Not to be handed to `coder` until the
-architect clears iteration 2. Two items remain for the human (§16.2, **ESC-S1-1**, **ESC-S1-2**, in the
-architect's sharpened form); neither blocks building slice 1.
-**Date:** 2026-10-03 (iteration 1) · revised 2026-10-03 (iteration 2)
-**Iteration:** 2 of 5
+**Status:** **APPROVED FOR CODER — iteration 3 of 5 (CORE cap), pending the architect's presence check
+of the RC2-1…RC2-4 fold.** Iteration 1 was **APPROVED WITH REQUIRED CHANGES** (architect, 2026-10-03).
+Iteration 2 was **APPROVED WITH REQUIRED CHANGES** (architect, 2026-10-04: *"Ready for the coder,
+subject to RC2-1…RC2-4"*). Both reviews are preserved verbatim at the end of this document. This
+iteration folds RC2-1…RC2-4 into the body and nothing else. The architect checks the fold for presence
+only; it is not another design round. Where the iteration-2 review's §D and this body differ, §D
+governs. TD-O1…TD-O7 are **ruled** (§16.1; ADR-1542 Amendment 2, AM2-1…AM2-7). Two items remain for
+the human (§16.2, **ESC-S1-1**, **ESC-S1-2**). Neither blocks *coding* PR 1. **ESC-S1-1 blocks
+*merging* PR 1**: the human answers it at or before PR 1's CODEOWNERS review (see the blocking table
+under "Human Review Required").
+**Date:** 2026-10-03 (iteration 1) · revised 2026-10-03 (iteration 2) · revised 2026-10-04 (iteration 3)
+**Iteration:** 3 of 5
 
-**Iteration-2 change log** (each RC → the sections it changed; no other section was edited):
+**Iteration-3 change log** (each RC2 → the sections it changed; no other section was edited; both
+architect-review sections are untouched):
+
+| RC2 | Change | Sections |
+|---|---|---|
+| RC2-1 | New closure check **C2′**: once closure is enforced, every head entry whose fingerprint is not in `B.entries` must be `debt`; violations → `closure.new_accepted[]`, exit 3. After the seal no new `accepted` entry can be created | §6.3 TD-D6, §6.4 (C2′ row, C0 row, consequence list), §6.7, §8.2 `detect`, §8.5 `closure` payload, §12.3 closing rule, §13.2 `T-BL-18`/`T-BL-19`, §13.3 `T-CLI-20`, §14 PR 2 note |
+| RC2-2 | `T-FN-08`: exact-equality check of `EXCLUDED_NAMES` under CPython 3.12 only, visible skip otherwise; PR 1 body records the generating interpreter and expression | §4.4, §13.1, §14 PR 1, §15 item 7, §16.1 (RC-3 note) |
+| RC2-3 | Two-cause stderr wording ("…index grew, or the base was non-conformant"); new non-claim **N10** (closure is relative to the PR base, not to the seal) | §5 N9 + new N10, §8.5, §13.2 `T-BL-17`, §13.4 closing line (N1–N10) |
+| RC2-4 | (a) `overseer.md:758`/`:768` → `accepted`, `"descriptive reference"`, owner `#1538` (ruling (b)); `:585`/`:810`/`:823` stay debt / slice 1b. (b) §8.2 `baseline-init` C0 wording. (c) Owner "—" means "keep the §6.5 default", never `null` | §12.3, §8.2 |
+| — | Status header; human blocking table (ESC-S1-1 blocks PR 1 merge, not coding) | header, §16.2, Human Review Required (iteration-3 addendum) |
+
+**Iteration-2 change log** (kept for history):
 
 | RC | Change | Sections |
 |---|---|---|
@@ -373,6 +388,13 @@ generates the literal with a 3.12 interpreter (e.g. `uv run --python 3.12`, or t
 host (only 3.14.4), and a list typed from memory or from 3.14 would be the defect RC-3 removes.
 Changing the constant later is a protected-surface code change.
 
+**Provenance proof (iteration 3, RC2-2).** `T-FN-06` and `T-FN-07` alone would pass for a literal
+generated under the wrong interpreter. **`T-FN-08`** (§13.1) therefore asserts exact equality of the
+literal against the generating expression, and runs only under CPython 3.12. The required `tests` job
+runs 3.12 (`tests.yml:71`), so it runs on every PR. Under any other interpreter it is **visibly
+skipped**, never silently passed. The **PR 1 description must state the exact interpreter version**
+(for example `CPython 3.12.x`) **and the one-line generating expression** used to produce the literal.
+
 Private names (`_find_human_approval`) are **included**. L2 builds it with `ast.parse`; **a tracked
 file that fails to parse is an operational failure (exit 1, naming the file)** — silently skipping it
 would silently shrink the rule.
@@ -430,8 +452,17 @@ substance, in L1's module docstring):
   C1′ admits it, because the text existed at base. But X1 still requires a matching baseline entry, so
   that code-only PR must also edit the baseline, which is a protected-surface edit. This coupling is
   known and accepted: the alternative (freezing the index) would let new functions go unflagged. The
-  stderr line for such a finding names the cause: `sandbox-coverage: <RULE> <doc>:<line>: text
-  unchanged since base; repo-function index grew: <text>` (§8.5).
+  stderr line for such a finding names **both possible causes**, because the detector computes no base
+  function index and cannot tell them apart: `sandbox-coverage: <RULE> <doc>:<line>: text unchanged
+  since base and absent from the base baseline; L1 unchanged — repo-function index grew, or the base was
+  non-conformant: <text>` (§8.5; iteration 3, RC2-3).
+- **N10 — Closure is relative to the base, not to the seal (iteration 3, RC2-3).** A site that reaches
+  `main` without a baseline entry — during the advisory window before ESC-S1-2, or by a human merge over
+  a red required check — is pre-existing text for every later PR. C1′ admits it, and X1 then forces the
+  next PR that touches nothing related to add its entry. The detector cannot tell that inheritance apart
+  from N9's index growth. The control is to close the advisory window promptly (ESC-S1-2) and to treat a
+  red `sandbox-detector` on `main` as a defect. The two-cause stderr line (§8.5) makes the inheritance
+  visible instead of attributing it to someone else's code.
 
 **Empirical characterization performed for this design.** A throwaway prototype of §3–§4 was run
 against HEAD (results §12). It drove four design changes: the ≥2-word command-shape floor (§3.3),
@@ -506,6 +537,15 @@ dispositions (by hand, human-reviewed — the file is a protected surface), usin
 Prohibitions written in future should use fragment spans (`` `-f body=@path` ``), which are not
 command-shaped and trip no rule — so no future change ever *needs* a new `accepted` entry.
 
+**C2′ — no new `accepted` entry after the seal (iteration 3, RC2-1).** C2 alone compares dispositions
+only for fingerprints present in both `B` and `H`. A rule rename or a fingerprint-version bump gives
+every entry a new fingerprint, so C1′ admits them all (correctly) and C2 compares nothing; the same PR
+could then re-mark former `debt` entries `accepted`. C2′ (§6.4) closes that: once closure is enforced,
+every head entry whose fingerprint is **not** in `B.entries` must be `debt`. The C0 seal is exempt
+(closure is `not_applicable` there, and the seal assigns the initial dispositions). Consequence: **after
+the seal, no new `accepted` entry can ever be created.** A new or renamed rule that surfaces a
+prohibition sentence produces `debt`, and the remedy is to rewrite that sentence with a fragment span.
+
 ### 6.4 "Closed" — the exact checks `detect` performs
 
 Let **F** = the findings computed on the working tree; **H** = the head baseline (the committed file
@@ -518,7 +558,8 @@ refs/remotes/origin/main` (the constant `BASE_REF`; not configurable — §8.4).
 | X2 | **Metadata:** `H.rules == RULE_IDS`, `H.docs == SCANNED_DOCS`, `H.fingerprint_version == FINGERPRINT_VERSION` | exit 3 (`metadata_mismatch[]`) |
 | C1′ | **Closure (RC-1):** every `e ∈ H.entries` has `e.fingerprint ∈ B.entries ∪ FP(scan_head_L1(base_docs, head_facts))`, where `base_docs` = each `SCANNED_DOCS` path read via `git show <base>:<path>` (a path absent at base reads as the empty document; any other `git show` failure is exit 1), scanned by the **head** L1 with the **head** `RepoFacts` | `closure.added[]` — exit 3 |
 | C2 | **Disposition monotonicity:** for `e` in both `B` and `H`, `B.e.disposition == "debt"` and `H.e.disposition == "accepted"` is forbidden | `closure.disposition_flips[]` — exit 3 |
-| C0 | **Introducing change (RC-2):** closure (C1′, C2) is `not_applicable` **only if** `scripts/framework/sandbox_coverage.py` is absent at **both** the merge-base **and** `refs/remotes/origin/main` (`git cat-file -e <commit>:<path>` fails for both). Then `closure.status = "not_applicable"` and `not_verified[]` says so | — |
+| C2′ | **New entries are debt (iteration 3, RC2-1):** when closure is enforced, every `e ∈ H.entries` whose fingerprint is **not** in `B.entries` must have `e.disposition == "debt"` | `closure.new_accepted[]` — exit 3 |
+| C0 | **Introducing change (RC-2):** closure (C1′, C2, C2′) is `not_applicable` **only if** `scripts/framework/sandbox_coverage.py` is absent at **both** the merge-base **and** `refs/remotes/origin/main` (`git cat-file -e <commit>:<path>` fails for both). Then `closure.status = "not_applicable"` and `not_verified[]` says so | — |
 | C0s | **Stale base (RC-2):** module **present at `refs/remotes/origin/main` but absent at the merge-base** | **exit 1**, `error: "stale base: merge origin/main"` |
 | C4 | Module present at the merge-base but the baseline file absent (at base, or at head) | exit 1 |
 | R1 | **Reporting, not failing (RC-6):** `removed_since_base[]` = entries in `B` whose fingerprint is not in `H` (each with `doc`, `line`, `rule`, `text`, `disposition`, `owner`); `l1_changed_since_base` = whether the git blob of `scripts/framework/sandbox_coverage.py` at the merge-base differs from the head file (`git rev-parse <base>:<path>` vs `git hash-object <path>`) | never changes the exit code; when `l1_changed_since_base` is true **and** `removed_since_base` is non-empty, one stderr line: `sandbox-coverage: NOTE L1 changed and <n> baseline entries were removed since base — rule narrowing or fixed sites; reviewer must confirm which (N8)` |
@@ -541,7 +582,10 @@ findable — a new or renamed rule, a newly scanned document, a fingerprint-vers
 - a newly scanned document **absent at base** reads as empty, so it must be **clean** — any finding in it
   is in `closure.added`;
 - the fingerprint function is applied to both sides by the same (head) L1, so a fingerprint-version
-  change needs no special case.
+  change needs no special case;
+- C1′ governs **which** entries are admissible; C2′ governs **their disposition**: every admitted entry
+  whose fingerprint is new relative to `B` is `debt`, so a rename or fingerprint-version bump cannot
+  launder `debt` into `accepted` (iteration 3, RC2-1).
 
 **C0 is the one-time seal moment** and is deterministic: it applies to exactly the PR that introduces
 the module, while `origin/main` does not yet have it. In that PR `detect` runs X1 and X2 only. **RC-2:**
@@ -592,7 +636,7 @@ human's ESC-3 disposition (§6.7), never a check.
 ESC-3 asks whether v0.7.0 work may add "call this function" prose **before the detector is required**.
 The design does not answer it; it makes every answer executable:
 
-- **After the detector exists on `main`:** C1′/C2 apply to everyone, under all three options. This is
+- **After the detector exists on `main`:** C1′/C2/C2′ apply to everyone, under all three options. This is
   not an ESC-3 choice — ADR AD-11 binds it, and AM2-2 fixes its meaning (an addition is construct text
   absent from the base commit's scanned documents). There is deliberately **no admission flag, env var,
   label or file** for post-seal additions, and the architect does not recommend amending AD-11 (§16.2).
@@ -686,9 +730,9 @@ python3 scripts/framework/sandbox_coverage_cli.py <subcommand>
 | Subcommand | Kind | Does |
 |---|---|---|
 | `scan` | reporter | Computes F for all four documents; emits every finding. Reads no baseline, needs no base. |
-| `detect` | gate | §6.4 checks X1, X2, C0/C0s, C1′, C2, C4, and the R1 reporting (RC-1, RC-2, RC-6). For C1′ it reads each scanned document at the merge-base with `git show <base>:<path>` and scans it with the head L1 and head `RepoFacts`. |
+| `detect` | gate | §6.4 checks X1, X2, C0/C0s, C1′, C2, C2′, C4, and the R1 reporting (RC-1, RC-2, RC-6; C2′ is iteration 3, RC2-1). For C1′ it reads each scanned document at the merge-base with `git show <base>:<path>` and scans it with the head L1 and head `RepoFacts`. |
 | `coverage` | gate | §7 legs; leg 1 enforced, legs 2/3 per `ALLOWLIST_LEGS_ACTIVE`. |
-| `baseline-init` | writer | Writes the baseline from F (all `disposition: "debt"`, default owners, provenance) **only if C0 holds** (module absent at base); otherwise refuses. May overwrite an existing file *only* under C0 (so the introducing PR can re-seal after merging main). |
+| `baseline-init` | writer | Writes the baseline from F (all `disposition: "debt"`, default owners, provenance) **only if C0 holds** (module absent at both the merge-base and `origin/main`; C0s is exit 1); otherwise refuses. May overwrite an existing file *only* under C0 (so the introducing PR can re-seal after merging main). |
 | `baseline-prune` | writer | Removes `stale[]` entries and refreshes `line` on surviving entries; **never adds an entry, never changes `disposition`/`owner`/`rationale`**. Reports `unbaselined[]` but does not act on it. |
 
 ### 8.3 Exit codes (AD-2 rule 3, applied)
@@ -722,12 +766,15 @@ subclass whose `error()` emits the envelope — TD-1357 §3.3). Diagnostics go t
 finding in the form `sandbox-coverage: <RULE> <doc>:<line>: <text>` (truncated to 160 chars), so CI
 logs are readable without parsing JSON. Stderr is never suppressed. Two cause-annotated forms (`detect`
 only): an **unbaselined** finding whose fingerprint is in the base-scan set but not in `B` — i.e.
-admissible pre-existing text that only needs an entry (N9, RC-8) — prints `sandbox-coverage: <RULE>
-<doc>:<line>: text unchanged since base; repo-function index grew: <text>` when the rule is
-`SB-FNCALL` and `l1_changed_since_base` is `false` (with L1 unchanged, the only input that can make
-unchanged `SB-FNCALL` text newly findable is `FN_INDEX` — no base index is computed), and
-`… text unchanged since base; newly findable: <text>` otherwise. The R1 rule-narrowing note (§6.4) is
-one further line.
+admissible pre-existing text that only needs an entry (N9, N10, RC-8) — prints `sandbox-coverage: <RULE>
+<doc>:<line>: text unchanged since base and absent from the base baseline; L1 unchanged — repo-function
+index grew, or the base was non-conformant: <text>` when the rule is `SB-FNCALL` and
+`l1_changed_since_base` is `false` (with L1 and the text unchanged, the only inputs that produce this
+signature are `FN_INDEX` growth or a base that was itself non-conformant — no base index is computed,
+so the line names both causes and asserts neither), and `sandbox-coverage: <RULE> <doc>:<line>: text
+unchanged since base and absent from the base baseline — newly findable, or the base was
+non-conformant: <text>` otherwise *(iteration 3, RC2-3: both forms reworded)*. The R1 rule-narrowing
+note (§6.4) is one further line.
 
 **Envelope (every record):**
 
@@ -750,8 +797,10 @@ one further line.
   `counts: {total, by_rule{}, by_doc{}}`.
 - `detect`: `conformant`, `findings_total`, `baseline_entries`, `debt_count`, `accepted_count`,
   `unbaselined[]`, `stale[]`, `metadata_mismatch[]`,
-  `closure: {status: "enforced"|"not_applicable", added[], disposition_flips[]}` *(iteration 2, RC-1:
-  `count_growth[]` dropped)*, `removed_since_base[]` (each `{fingerprint, doc, line, rule, text,
+  `closure: {status: "enforced"|"not_applicable", added[], disposition_flips[], new_accepted[]}`
+  *(iteration 2, RC-1: `count_growth[]` dropped; iteration 3, RC2-1: `new_accepted[]` added — head
+  entries whose fingerprint is not in `B` and whose disposition is `accepted` (C2′); empty when closure
+  is `not_applicable`)*, `removed_since_base[]` (each `{fingerprint, doc, line, rule, text,
   disposition, owner}`; empty when closure is `not_applicable`), `l1_changed_since_base` (bool; `false`
   when not applicable) *(RC-6)*.
 - `coverage`: `conformant`, `legs: {exists_invocable: "enforced", allowlisted: "enforced"|"inactive",
@@ -782,7 +831,8 @@ L1 public surface — these names and shapes, nothing else exported:
 - `evaluate_baseline(findings, head: Baseline, base: BaseState, facts: RepoFacts) -> BaselineVerdict` —
   decides C0/C0s from the two booleans (C0s is returned as an operational-error verdict that L2 maps to
   exit 1), computes the C1′ admissible set by calling `scan_document` on `base.doc_texts` with the head
-  `facts`, and fills `removed_since_base`/`l1_changed_since_base`. *(Iteration 2: signature changed from
+  `facts`, computes C2′'s `new_accepted` (iteration 3, RC2-1), and fills
+  `removed_since_base`/`l1_changed_since_base`. *(Iteration 2: signature changed from
   `base: Baseline | None, base_has_module: bool` for RC-1/RC-2/RC-6.)*
 - `EXCLUDED_NAMES: frozenset[str]` — the RC-3 literal (§4.4).
 - `evaluate_coverage(docs_by_role: Mapping[str, Mapping[str, str]], facts, policies: Mapping[str, dict] | None, legs_active: bool) -> CoverageVerdict`
@@ -989,12 +1039,24 @@ Refinements to §6.5's defaults (everything else keeps its default):
 | `SB-RAWGIT` `git tag`/`git describe`/`gh release …` (worker.md:416-417, :511-512, :642) | `ADR-1542 slice 5` (release) | debt, except "never" lines → accepted |
 | `SB-RAWGIT`/`SB-SUBST` `git show origin/main:…` (overseer.md:190), `git merge-base`/`git diff --name-only $(…)` (:241, :250) | `ADR-1542 slice 5` (VF-8, G2) | debt |
 | overseer-cron:29-32 loop (incl. its `SB-SUBST`); both identity-guard lines per prompt; worker-cron `cd "$REPO_ROOT"` fences | `ADR-1542 slice 3` | debt |
-| **Descriptive call-a-function / library references:** `overseer.md:585` (`::is_bot_reviewer`), `:758`, `:768`, `:810` (`post_comment()`), `:823` (`post_comment()` "remains the correct call") | `ADR-1542 slice 1b` | **debt** *(RC-5(a), AM2-1 corollary; were "accepted — descriptive reference" in iteration 1)* |
+| **Descriptive call-a-function references:** `overseer.md:585` (`::is_bot_reviewer`), `:810` (`post_comment()`), `:823` (`post_comment()` "remains the correct call") | `ADR-1542 slice 1b` | **debt** *(RC-5(a), AM2-1 corollary; were "accepted — descriptive reference" in iteration 1)* |
+| **Descriptive shell-library references:** `overseer.md:758` (`` `bootstrap/lib/comment_format_check.sh` ``), `:768` (`` `scripts/oversight/lib/detect_stack.sh` ``) — `SB-SRCLIB` inside explanatory prose | `#1538` (the `SB-SRCLIB` default) | **accepted**, rationale exactly `"descriptive reference"` *(iteration 3, RC2-4(a): architect ruling (b) reverses RC-5(a) for these two)* |
 | Prohibition lists: `overseer.md:809` (`python3 -c "…post_comment(…)…"` — both its `SB-PYC` and `SB-FNCALL` findings), `:812-819`; `worker.md:370, :413, :440, :511-512` "never"-sentences; worker-cron:102, `:112` | — | **accepted**, rationale exactly `"prohibition example"` |
 
-**Note on `:758`/`:768`.** These two are `SB-SRCLIB` findings, which is a shell-construct rule, so §6.3
-would allow `accepted — descriptive reference` for them. RC-5(a) assigns them `debt` / slice 1b anyway.
-That is the stricter choice, and it is applied as ruled.
+**Owner "—" (iteration 3, RC2-4(c)).** An Owner cell of "—" means *keep the §6.5 default owner for that
+rule*. It never means "no owner". Every entry, `accepted` ones included, carries an owner string that
+matches the §6.1 pattern, which `T-RP-06` enforces. Never write `null` or `"—"` into the baseline.
+
+**Note on `:758`/`:768` (iteration 3, RC2-4(a); architect ruling (b), 2026-10-04).** On HEAD, `:758` is
+`` `bootstrap/lib/comment_format_check.sh` `` and `:768` is `` `scripts/oversight/lib/detect_stack.sh` ``.
+Both are `SB-SRCLIB` findings (a shell-construct rule) inside explanatory prose that instructs nothing
+("All three wrappers below call…", "same idiom as … in …"). The AM2-1 corollary covers only the
+call-a-function family, so it does not apply; §6.3's rule governs and gives **`accepted`, rationale
+exactly `"descriptive reference"`**, owner the `SB-SRCLIB` default `#1538`. The iteration-1 RC-5(a)
+classification as debt rested on a factual error, would have assigned slice 1b to "remove" accurate
+prose (achievable only by stripping code-span backticks, which games the detector), and was an ad-hoc
+exception to the rule below. `:585`, `:810` and `:823` are call-a-function references and stay **debt /
+`ADR-1542 slice 1b`**. The PR 1 human reviewer confirms every `accepted` entry, these two included.
 
 The rule for the coder, applied entry by entry: **`accepted` only if the enclosing sentence prohibits the
 construct (rationale `"prohibition example"`), or — for shell-construct rules only — names it without
@@ -1002,7 +1064,8 @@ instructing the agent to perform it (rationale `"descriptive reference"`); other
 call-a-function-family entry is never `accepted — descriptive reference`** (AM2-1; schema-enforced,
 §6.3). When in doubt,
 `debt` (stricter, and C2 permits moving it to `debt` later but not the reverse). The human reviewer of
-the slice-1 PR confirms every `accepted` entry.
+the slice-1 PR confirms every `accepted` entry. **The seal is the only point at which `accepted` entries
+are created** — after it, C2′ forces every new fingerprint to `debt` (iteration 3, RC2-1).
 
 ---
 
@@ -1034,7 +1097,10 @@ All under `tests/framework/`. Named cases are requirements; the coder may add mo
   EXCLUDED_NAMES`, with `FN_INDEX` built from the real repository. A new Python version that introduces
   a colliding name fails this named test instead of silently changing the finding set; `T-FN-07`
   `EXCLUDED_NAMES` is a literal `frozenset` (AST check: L1 assigns it from a set/frozenset literal, with
-  no call to `dir`).
+  no call to `dir`); **`T-FN-08` (iteration 3, RC2-2)** when `sys.version_info[:2] == (3, 12)`, assert
+  `EXCLUDED_NAMES == frozenset(set(dir(builtins)) | set(dir(dict)) | set(dir(list)) | set(dir(str)) |
+  {"main"})`; on any other interpreter, skip (a visible `pytest.skip`/`skipif`, never a silent pass) with
+  the reason exactly `"EXCLUDED_NAMES provenance is verified only under CPython 3.12 (the tests job)"`.
 - **`SB-RAWGIT` hardening (RC-7):** `T-R-RAWGIT-P8` — `git log --output=/tmp/claude/x.txt` and
   `git diff --stat --output /tmp/claude/x.txt` both fire, although `git log …` and `git diff --stat …`
   are otherwise in the read-only set.
@@ -1062,8 +1128,14 @@ module-at-merge-base without baseline → error; `T-BL-14` C0 (module absent at 
 the merge-base but present at `origin/main` → stale-base error verdict; **`T-BL-16` (RC-6)** entries in
 `B` not in `H` appear in `removed_since_base` with `doc/line/rule/text`, and the verdict exposes
 `l1_changed_since_base` from `BaseState.l1_changed`; **`T-BL-17` (RC-8)** an unbaselined `SB-FNCALL`
-finding whose fingerprint is in the base-scan set, with L1 unchanged → classified for the
-"repo-function index grew" stderr cause. Coverage: `T-CV-01` missing script → `COV-MISSING`; `T-CV-02` `./x.sh` with
+finding whose fingerprint is in the base-scan set, with L1 unchanged → classified for the two-cause
+stderr line, whose text is exactly `text unchanged since base and absent from the base baseline; L1
+unchanged — repo-function index grew, or the base was non-conformant: <text>` *(iteration 3, RC2-3)*;
+**`T-BL-18` (iteration 3, RC2-1)** a rule rename over unchanged docs, with one former-`debt` entry
+re-marked `accepted` under its new fingerprint → that entry is in `closure.new_accepted`, verdict
+non-conformant (exit-3 class); **`T-BL-19` (iteration 3, RC2-1)** a fingerprint-version bump with an
+`accepted` entry carried across under its new fingerprint → that entry is in `closure.new_accepted`,
+verdict non-conformant (exit-3 class). Coverage: `T-CV-01` missing script → `COV-MISSING`; `T-CV-02` `./x.sh` with
 mode `100644` → `COV-NOT-INVOCABLE`; `T-CV-03` `bash x.sh` with mode `100644` → invocable; `T-CV-04`
 `python3 -m a.b` without `__main__` → `COV-NOT-INVOCABLE`; `T-CV-05` namespace subpackage module
 resolves; `T-CV-06` `lib/*.sh` reference is not a surface; `T-CV-07` single-word `.py` mention is not a
@@ -1098,7 +1170,9 @@ subprocess timeout → exit 1; **`T-CLI-19` (RC-2)** a branch whose merge-base p
 and `baseline-init` also exits 1; **`T-CLI-20` (RC-1)** end-to-end C1′ through real `git show`: base has
 module + baseline; head renames a rule in L1 and adds a new site in a scanned doc with matching entries →
 exit 3, `closure.added` contains only the new site; and a `git show <base>:<doc>` failure other than
-path-absent → exit 1; **`T-CLI-21` (RC-6)** head edits L1 and removes a baselined site plus its entry →
+path-absent → exit 1; and **on its passing half** (the same rename with the new site removed, every
+renamed entry kept `debt`) → exit 0 with `closure.added == []` and **`closure.new_accepted == []`**
+*(iteration 3, RC2-1)*; **`T-CLI-21` (RC-6)** head edits L1 and removes a baselined site plus its entry →
 exit 0, `removed_since_base` lists it, `l1_changed_since_base == true`, and stderr contains the
 `NOTE L1 changed …` line. The same removal without an L1 change produces no NOTE line.
 
@@ -1123,7 +1197,7 @@ L1 or L2 (AST walk).
 
 **What these tests prove, stated per AD-13's distinction:** 13.1–13.2 prove the *rules and logic*;
 13.3 proves the *wiring and the fail-closed paths*; 13.4 proves the *real repository is in the state the
-gate claims*. None proves N1–N9 of §5.
+gate claims*. None proves N1–N10 of §5.
 
 ---
 
@@ -1154,6 +1228,10 @@ Commit split (≤6): (a) L1 + rules/extraction tests; (b) baseline logic + cover
 DECISIONS. **Before (d), merge `origin/main`** so the seal absorbs everything landed to date; if main
 moves again before merge, re-run `baseline-init` (permitted under C0) and refine any new entries.
 
+**PR 1 description must state (iteration 3, RC2-2):** the exact CPython 3.12 interpreter version used to
+generate the `EXCLUDED_NAMES` literal, and the one-line generating expression (§4.4). `T-FN-08` then
+verifies the literal on every PR in the 3.12 `tests` job.
+
 ### PR 2 — promotion to required (5 files; iteration 2, RC-4)
 
 | # | Path | Content |
@@ -1164,7 +1242,7 @@ moves again before merge, re-run `baseline-init` (permitted under C0) and refine
 | 4 | `tests/framework/test_sandbox_coverage_repo.py` | add `T-RP-05`, `T-RP-09` |
 | 5 | `DECISIONS.md` | dated promotion entry, noting AM2-7(ii) is not enlarged |
 
-PR 2 is the first change for which closure (C1′, C2) is **enforced** (the module exists at its base); its own
+PR 2 is the first change for which closure (C1′, C2, C2′) is **enforced** (the module exists at its base); its own
 `sandbox-detector` run is the live end-to-end proof of the closure path. After PR 2 merges, the human
 re-runs the script (ESC-S1-2).
 
@@ -1190,7 +1268,9 @@ artifacts the coder's own commits require.
 6. `grep -n "environ\|getenv\|--force\|--skip\|shell=True\|2>/dev/null" scripts/framework/sandbox_coverage*.py`
    returns nothing.
 7. The PR 1 description lists the final per-rule/per-document counts, the debt/accepted split, and every
-   entry with `introduced_at > 2026-09-12` (§6.7).
+   entry with `introduced_at > 2026-09-12` (§6.7), **and (iteration 3, RC2-2) the exact CPython 3.12
+   interpreter version and one-line expression that generated the `EXCLUDED_NAMES` literal**;
+   `T-FN-08` passes (not skips) in the PR's `tests` job.
 8. **(iteration 2, RC-4)** After PR 2: neither `sandbox-detector` nor `sandbox-coverage` appears inside
    the literal `"contexts": [ … ]` array of `scripts/framework/setup_branch_protection.sh` (header
    comments may name the file that supplies them; `T-RP-05` asserts this); `scripts/framework/hos_required_contexts.txt` is absent from
@@ -1221,7 +1301,10 @@ closed and is not re-opened in this iteration.)*
 applied: **RC-3's literal contents.** The constant's derivation, location, form and guard tests are
 specified in §4.4 and §13.1. The literal name list itself is not enumerated in this document, because
 no CPython 3.12 interpreter was available to `technical-design` on this host (3.14.4 only). The coder
-generates it under 3.12 in PR 1, and `T-FN-06`/`T-FN-07` verify it.
+generates it under 3.12 in PR 1, and `T-FN-06`/`T-FN-07` verify it. **Ruled (architect iteration-2
+review, ruling (a)): accepted, conditional on RC2-2**, now applied — `T-FN-08` verifies the literal's
+provenance by exact equality under 3.12, and the PR 1 description records the interpreter and
+expression (§4.4, §13.1, §14, §15 item 7).
 
 ### 16.2 For the human (architect's sharpened forms, review §E)
 
@@ -1233,13 +1316,19 @@ ADR ESC-1, ESC-2 and ESC-3 are unchanged and still held. Slice 1 depends on none
   recommendation: absorb it (ESC-3 option (b)).** Reverting would remove the #1207/#1657 two-list
   correctness fix, and slice 2's `query_prs.sh --reviews` plus `query_issues.sh --comments` is its
   surface. Post-seal additions need no ruling: AD-11 stands as clarified by AM2-2, and nothing new is
-  admissible after the seal.
+  admissible after the seal. **Blocking (iteration 3):** does **not** block coding PR 1 — the coder
+  seals under the recommended default (absorb as `debt`, owner `ADR-1542 slice 2`). It **does block
+  merging PR 1**: the human answers it at or before PR 1's CODEOWNERS review, where §6.7's post-ADR list
+  is presented. If the answer is "revert", the revert lands first as a separate protected-surface PR,
+  and PR 1 re-seals after merging `origin/main` (permitted under C0).
 - **ESC-S1-2 — promotion is a human action.** *Action:* after PR 2 merges, re-run
   `setup_branch_protection.sh` **from the HOS repo**, which picks up `sandbox-detector` and
   `sandbox-coverage` from `scripts/framework/hos_required_contexts.txt` (§9.3). Per the #737 rule
   recorded in `DECISIONS.md`, do this only once both contexts have each produced at least one real run;
   PR 1's and PR 2's own CI runs satisfy that. **Recommendation: same day as PR 2's merge.** Until then
-  the checks report but do not block.
+  the checks report but do not block. **Blocking (iteration 3):** blocks neither coding nor merging PR 1
+  or PR 2; it blocks only the promotion to required. Per N10 (RC2-3), every day it slips is a day new
+  sites can land on `main` and be inherited by later PRs.
 
 ---
 
@@ -1297,6 +1386,37 @@ genuine pre-existing defect outside this slice (AM2-7(ii)), which is routed, not
 
 **Iteration log:** iteration 2 of 5. Requesting architect re-review: RC-1…RC-4 substantively, RC-5…RC-10
 for presence.
+
+### Iteration-3 addendum to the self-flag
+
+**RISK: MEDIUM (unchanged).** **CONFIDENCE: HIGH** on the closure semantics. RC2-1's C2′ closes the
+disposition-laundering hole (rename or fingerprint-version bump re-marking `debt` as `accepted`), and
+it is exercised by `T-BL-18`, `T-BL-19` and `T-CLI-20`'s passing half. RC-3's residual MEDIUM is
+**closed** by `T-FN-08`. It runs in the 3.12 `tests` job on every PR, and the PR 1 description records
+the provenance.
+
+**Change classification: `clarifying` for iteration 3.** Every edit folds a fully specified architect
+required change (RC2-1…RC2-4) into an unbuilt design. C2′ is a new check, but it refines TD-D6 within
+AD-11 as amended by AM2-2, and the architect specified it completely. No ADR change.
+
+**Startup-gap check on iteration 3's own changes.** *Should RC2-1 have been settled in the initial
+design?* Yes. It is a fail-open shape in closure, and it was caught by architect review before any code
+existed. *Affected sign-offs:* none. Nothing has been built or approved against iterations 1 or 2.
+RC2-4(a) reverses a round-1 ruling before anything was built on it, so no approval is orphaned.
+
+**Human-held items — blocking status** (matches architect iteration-2 review §E):
+
+| Item | Blocks coding PR 1? | Blocks merging PR 1? | Blocks later |
+|---|---|---|---|
+| ADR **ESC-1** | No | No | Slice 8 (lifecycle / `is_poisoned` debt owners) |
+| ADR **ESC-2** | No | No | Slice 9 (policy templates; activation of coverage legs 2/3) |
+| ADR **ESC-3** | No | No, because its slice-1 residue is ESC-S1-1 | Nothing further: post-seal additions are settled by AD-11 and AM2-2 |
+| **ESC-S1-1** (absorb `overseer.md:337-340`?) | **No.** The coder seals under the recommended default (absorb as `debt`, owner `ADR-1542 slice 2`) | **Yes.** The human must answer it at or before PR 1's CODEOWNERS review, where §6.7's post-ADR list is presented. If the answer is "revert", the revert lands as a separate protected-surface PR first, and PR 1 re-seals after merging `origin/main` (permitted under C0) | — |
+| **ESC-S1-2** (re-run `setup_branch_protection.sh`) | No | No; it does not block PR 2 either | The **promotion** to required, after PR 2 merges. Per N10 (RC2-3), every day it slips is a day new sites can land on `main` and be inherited |
+
+**Iteration log:** iteration 3 of 5. Architect verdict on iteration 2: APPROVED WITH REQUIRED CHANGES;
+the coder may begin PR 1 now. This iteration folds RC2-1…RC2-4. Requesting the architect's
+**presence-only** check of the fold (per the iteration-2 review, not another design round).
 
 ---
 
